@@ -27,7 +27,7 @@ SETTINGS = {
         "GAP_RANGES":[(None, None)] 
     },
     "TQQQ": {
-        "ACTIVE": False,
+        "ACTIVE": True ,
         "START_DATE": "2012-01-01",
         "END_DATE": "2025-04-01",
         "INITIAL_CASH": 1000,
