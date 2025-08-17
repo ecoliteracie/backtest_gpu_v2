@@ -11,7 +11,8 @@ from src.validate import require_columns
 from src.windowing import compute_requested_window, trim_for_backtest
 from src.benchmarks import buy_and_hold
 from src.gpu_backend import select_backend, sanity_compute_check
-from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k
+from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7
+from src.columns import detect_rsi_columns, analyze_rsi_invariants
 
 
 def _ensure_dirs() -> None:
@@ -148,6 +149,35 @@ def main() -> int:
     print(banner6)
     for line in banner6.splitlines():
         logger6.info(line)
+
+    log7_path = Path("logs") / "phase07_rsi_columns.log"
+    logger7 = get_logger("phase07", log7_path)
+
+    try:
+        # df should be the trimmed DataFrame from prior phases
+        rsi_maps = detect_rsi_columns(df)
+        diag = analyze_rsi_invariants(df, rsi_maps)
+
+        banner7 = phase7.build_banner(rsi_maps, diag)
+        print()
+        print(banner7)
+        for line in banner7.splitlines():
+            logger7.info(line)
+
+        if not diag["bounds"]["ok"]:
+            msg = f"Phase 7 failed: {diag['bounds']['reason']}"
+            print(msg)
+            logger7.error(msg)
+            sys.exit(1)
+
+        # Expose for downstream phases
+        RSI_MAPS = rsi_maps  # keep in scope; pass to Phase 8 consumer(s)
+    except Exception as e:
+        msg = f"Phase 7 failed: {e}"
+        print(msg)
+        logger7.error(msg)
+        sys.exit(1)
+    # ---- End Phase 7 ----
 
     return 0
 
