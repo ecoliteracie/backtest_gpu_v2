@@ -6,53 +6,36 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-
+# Phase 2 utilities (unchanged)
 def resolve_csv_path(cfg: dict, base_dir: str | None = None) -> str:
-    """
-    Resolve CSV_CACHE_FILE to an absolute path.
-    - If absolute, normalize and return.
-    - If relative, resolve against base_dir (project root). If not provided,
-      resolve against the directory containing main.py (sys.argv[0]).
-    - If the bare filename does not exist at base_dir, also try base_dir/data/<name>.
-    """
     csv_value = str(cfg.get("CSV_CACHE_FILE", "")).strip()
     if not csv_value:
         raise ValueError("CSV_CACHE_FILE is empty")
 
     p = Path(os.path.expandvars(os.path.expanduser(csv_value)))
-
     if p.is_absolute():
         return str(p.resolve())
 
-    # Determine project root
     if base_dir:
         root = Path(base_dir)
     else:
-        # Directory where main.py lives
         root = Path(sys.argv[0]).resolve().parent
 
-    # First candidate: relative to project root
     cand1 = (root / p).resolve()
     if cand1.exists():
         return str(cand1)
 
-    # Second candidate: <root>/data/<filename>
     cand2 = (root / "data" / p.name).resolve()
     if cand2.exists():
         return str(cand2)
 
-    # Return normalized absolute path (first candidate) even if missing;
-    # caller will raise a clear FileNotFoundError with this absolute path
     return str(cand1)
 
-
 def _fast_line_count(path: Path) -> int:
-    """Count lines quickly in binary mode."""
     count = 0
     with path.open("rb", buffering=1024 * 1024) as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             count += chunk.count(b"\n")
-    # If file is non-empty and does not end with newline, add 1
     try:
         if path.stat().st_size > 0:
             with path.open("rb") as f:
@@ -63,18 +46,8 @@ def _fast_line_count(path: Path) -> int:
         pass
     return count
 
-
 def _read_header_and_samples(path: Path, sample_rows: int) -> tuple[str, List[str], str]:
-    """
-    Try to read header + up to sample_rows data lines.
-    Encoding strategy:
-      - try utf-8
-      - then utf-8-sig
-      - else open with utf-8(errors='replace') and mark as 'unknown'
-    Returns: (header_line, sample_lines, encoding_label)
-    """
     encodings = ["utf-8", "utf-8-sig"]
-    last_err = None
     for enc in encodings:
         try:
             with path.open("r", encoding=enc, newline="") as f:
@@ -85,13 +58,11 @@ def _read_header_and_samples(path: Path, sample_rows: int) -> tuple[str, List[st
                     if not line:
                         break
                     samples.append(line.rstrip("\r\n"))
-            # Strip BOM if any survived
             header = header.lstrip("\ufeff").rstrip("\r\n")
             return header, samples, enc
-        except UnicodeDecodeError as e:
-            last_err = e
+        except UnicodeDecodeError:
+            pass
 
-    # Fallback: unknown encoding; still attempt reading with replacement
     with path.open("r", encoding="utf-8", errors="replace", newline="") as f:
         header = f.readline()
         samples: List[str] = []
@@ -103,18 +74,7 @@ def _read_header_and_samples(path: Path, sample_rows: int) -> tuple[str, List[st
     header = header.lstrip("\ufeff").rstrip("\r\n")
     return header, samples, "unknown"
 
-
 def probe_csv(csv_path: str, sample_rows: int = 5) -> Dict[str, object]:
-    """
-    Validate file exists, then collect:
-      - abs_path
-      - size_bytes
-      - line_count
-      - encoding (best effort)
-      - header (raw line string)
-      - header_columns (simple comma split; quotes left as-is)
-      - samples (list[str], up to sample_rows)
-    """
     p = Path(csv_path).resolve()
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(f"CSV not found: {p.as_posix()}")
@@ -132,3 +92,47 @@ def probe_csv(csv_path: str, sample_rows: int = 5) -> Dict[str, object]:
         "header_columns": header.split(",") if header else [],
         "samples": samples,
     }
+
+# Phase 3: pandas DataFrame loader
+def load_prices(csv_path: str):
+    """
+    Load CSV into a pandas DataFrame with:
+      - Date parsed to datetime and set as sorted, unique index
+      - Open/High/Low/Close coerced to float64
+    Raises ValueError for duplicate or non-monotonic dates.
+    """
+    import pandas as pd
+
+    p = Path(csv_path).resolve()
+    if not p.exists() or not p.is_file():
+        raise FileNotFoundError(f"CSV not found: {p.as_posix()}")
+
+    df = pd.read_csv(
+        p,
+        parse_dates=["Date"],
+        infer_datetime_format=False,
+        dtype=None,  # we will coerce core columns after read
+    )
+
+    if "Date" not in df.columns:
+        raise ValueError("Missing required column: Date")
+
+    # Coerce OHLC to float64 if present
+    for col in ("Open", "High", "Low", "Close"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Indexing
+    df = df.set_index("Date", drop=True)
+    if not df.index.is_monotonic_increasing:
+        df = df.sort_index()
+
+    if not df.index.is_unique:
+        dup_count = (~df.index.to_series().drop_duplicates().index.isin(df.index)).sum()
+        # Simpler message:
+        raise ValueError("Duplicate dates detected in index; deduplicate or aggregate before proceeding")
+
+    if not df.index.is_monotonic_increasing:
+        raise ValueError("Date index is not monotonic increasing after sort")
+
+    return df
