@@ -121,3 +121,30 @@ Future phases should be appended here in the same format.
 * ROI ≈ +7.61%.
 * CAGR ≈ +13.23% over 211 calendar days.
 * Console banner and `logs/phase05_bh.log` matched exactly.
+
+## Phase 6K — GPU Backend Probe
+
+**Goal**
+
+* Verify CUDA availability via CuPy on Windows 11.
+* Capture device properties (name, compute capability, memory) and runtime/driver versions.
+* Run a tiny on-GPU compute and cross-check against CPU to confirm numerical correctness.
+
+**Changes**
+
+* Added `src/gpu_backend.py` →
+
+  * `select_backend("cupy")` probes device count, properties, versions, and runs a minimal device allocation/compute.
+  * `sanity_compute_check(cp)` performs `sum(sqrt(linspace(0,1,1024)))` on GPU and CPU (float64) and compares.
+  * `format_bytes()` helper for human-readable memory figures.
+* Added `src/banners/phase6k.py` for the Phase 6K banner.
+* Updated `main.py` → Phase 6K orchestration and logging to `logs/phase06_gpu_probe.log`.
+
+**Verification**
+
+* Ran `python main.py` after Phase 5.
+* Console displayed “Phase 6K — GPU Backend Probe” banner.
+* CuPy successfully imported; at least one CUDA device detected.
+* Reported backend=cupy, device name and id, compute capability, total/free memory, driver/runtime versions, and CuPy version.
+* Sanity compute passed: absolute error < 1e-12 between GPU and CPU results.
+* Exit code 0; `logs/phase06_gpu_probe.log` matched the console banner.

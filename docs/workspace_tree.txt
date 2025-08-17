@@ -1,0 +1,43 @@
+backtest_gpu_v2/
+├─ configs/
+│  ├─ default.py
+│  └─ __pycache__/
+├─ data/
+│  ├─ SOXL_full_ohlc_indicators.csv
+│  ├─ SOXL_full_ohlc_indicators - sample.csv
+│  └─ TQQQ_full_ohlc_indicators.csv
+├─ docs/
+│  └─ phase_log.md
+├─ indicators/
+├─ logs/
+│  ├─ phase01_init.log
+│  ├─ phase02_csv_probe.log
+│  ├─ phase03_df_load.log
+│  ├─ phase04_window.log
+│  ├─ phase05_bh.log
+│  └─ phase06_gpu_probe.log
+├─ results/
+├─ src/
+│  ├─ banners/
+│  │  ├─ __init__.py
+│  │  ├─ common.py
+│  │  ├─ phase1.py
+│  │  ├─ phase2.py
+│  │  ├─ phase3.py
+│  │  ├─ phase4.py
+│  │  ├─ phase5.py
+│  │  └─ phase6k.py
+│  ├─ benchmarks.py
+│  ├─ config_loader.py
+│  ├─ gpu_backend.py
+│  ├─ io_csv.py
+│  ├─ logging_setup.py
+│  ├─ validate.py
+│  └─ windowing.py
+├─ tools/
+├─ utils/
+│  └─ __pycache__/
+├─ phase_commit.py
+├─ backtest_gpu_v2.code-workspace
+├─ github_command.md
+└─ main.py
