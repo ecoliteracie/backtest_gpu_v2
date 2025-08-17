@@ -1,0 +1,8 @@
+[2025-08-17 10:45:26] INFO phase06k - =====================================================
+[2025-08-17 10:45:26] INFO phase06k - Phase 6K — GPU Backend Probe
+[2025-08-17 10:45:26] INFO phase06k - =====================================================
+[2025-08-17 10:45:26] INFO phase06k - [GPU] backend=cupy, device=NVIDIA GeForce RTX 5060 (id=0), cc=12.0
+[2025-08-17 10:45:26] INFO phase06k - [MEM] total=8.0 GiB, free=6.8 GiB
+[2025-08-17 10:45:26] INFO phase06k - [VER] driver=13000, runtime=12090, cupy=13.5.1
+[2025-08-17 10:45:26] INFO phase06k - [TEST] gpu_sum(sqrt(linspace(0,1,1024)))=682.493541110931119, cpu=682.493541110931119, abs_err=0.000e+00
+[2025-08-17 10:45:26] INFO phase06k - [LOG] Wrote: logs/phase06_gpu_probe.log

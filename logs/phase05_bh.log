@@ -1,7 +1,7 @@
-[2025-08-17 10:09:54] INFO phase05 - # Phase 5 — Buy-and-Hold Baseline
-[2025-08-17 10:09:54] INFO phase05 - 
-[2025-08-17 10:09:54] INFO phase05 - [WINDOW]  start=2010-07-19 → end=2025-07-01, days=5461
-[2025-08-17 10:09:54] INFO phase05 - [PRICES]  start_close=0.583333, end_close=24.709999
-[2025-08-17 10:09:54] INFO phase05 - [CASH]    initial=1,000.00 → final=42,360.02
-[2025-08-17 10:09:54] INFO phase05 - [METRICS] ROI=4136.002%, CAGR=28.474%
-[2025-08-17 10:09:54] INFO phase05 - [LOG]     Wrote: logs/phase05_bh.log
+[2025-08-17 10:45:26] INFO phase05 - # Phase 5 — Buy-and-Hold Baseline
+[2025-08-17 10:45:26] INFO phase05 - 
+[2025-08-17 10:45:26] INFO phase05 - [WINDOW]  start=2010-07-19 → end=2025-07-01, days=5461
+[2025-08-17 10:45:26] INFO phase05 - [PRICES]  start_close=0.583333, end_close=24.709999
+[2025-08-17 10:45:26] INFO phase05 - [CASH]    initial=1,000.00 → final=42,360.02
+[2025-08-17 10:45:26] INFO phase05 - [METRICS] ROI=4136.002%, CAGR=28.474%
+[2025-08-17 10:45:26] INFO phase05 - [LOG]     Wrote: logs/phase05_bh.log
