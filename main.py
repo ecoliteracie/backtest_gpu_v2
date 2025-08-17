@@ -10,9 +10,10 @@ from src.io_csv import resolve_csv_path, probe_csv, load_prices
 from src.validate import require_columns
 from src.windowing import compute_requested_window, trim_for_backtest
 from src.benchmarks import buy_and_hold
-from src.gpu_backend import select_backend, sanity_compute_check
-from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7
+from src.gpu_backend import select_backend, sanity_compute_check, select_backend
+from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8
 from src.columns import detect_rsi_columns, analyze_rsi_invariants
+from src.signals_gpu import make_buy_sell_masks
 
 
 def _ensure_dirs() -> None:
@@ -178,6 +179,59 @@ def main() -> int:
         logger7.error(msg)
         sys.exit(1)
     # ---- End Phase 7 ----
+
+
+    log8_path = Path("logs") / "phase08_masks_gpu.log"
+    logger8 = get_logger("phase08", log8_path)
+
+    try:
+        # Resolve single test combo from config
+        rsi_periods = list(sorted(cfg.get("RSI_PERIODS", [2])))
+        buy_period  = int(rsi_periods[0])
+        sell_period = int(rsi_periods[0])
+
+        buy_thr  = float(min(cfg.get("BUY_THRESHOLDS", [24])))
+        sell_thr = float(max(cfg.get("SELL_THRESHOLDS", [90])))
+
+        regime_mask = None  # optional, will add in Phase 9
+
+        # GPU backend: select_backend returns a dict with CuPy as 'xp'
+        backend = select_backend("cupy")
+        cp = backend["xp"]
+
+        # Build masks (you may pass either 'cp' or the whole 'backend' dict; both now work)
+        close_map = RSI_MAPS["close_map"]  # produced in Phase 7
+        buy_ok_dev, sell_ok_dev, meta = make_buy_sell_masks(
+            df=df,
+            close_map=close_map,
+            buy_period=buy_period,
+            sell_period=sell_period,
+            buy_thr=buy_thr,
+            sell_thr=sell_thr,
+            regime_mask_host=regime_mask,
+            cp=backend,  # pass backend dict so banner can use device_name/cc directly
+        )
+
+        # Banner
+        banner8 = phase8.build_banner(meta)
+        print()
+        print(banner8)
+        for line in banner8.splitlines():
+            logger8.info(line)
+
+        # Keep device masks for later phases
+        GPU_BUY_MASK = buy_ok_dev
+        GPU_SELL_MASK = sell_ok_dev
+
+    except Exception as e:
+        msg = f"Phase 8 failed: {e}"
+        print(msg)
+        logger8.error(msg)
+        sys.exit(1)
+    # ---- End Phase 8 ----
+
+
+
 
     return 0
 

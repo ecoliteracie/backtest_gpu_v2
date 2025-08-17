@@ -1,14 +1,14 @@
-[2025-08-17 16:22:12] INFO phase07 - ====================================================
-[2025-08-17 16:22:12] INFO phase07 - Phase 7 — RSI Column Binding & Invariants
-[2025-08-17 16:22:12] INFO phase07 - ====================================================
-[2025-08-17 16:22:12] INFO phase07 - [PERIODS] detected=2..14 (count=13)
-[2025-08-17 16:22:12] INFO phase07 - [CLOSE]   2:RSI_2_CLOSE, 3:RSI_3_CLOSE, 4:RSI_4_CLOSE, 5:RSI_5_CLOSE, 6:RSI_6_CLOSE, 7:RSI_7_CLOSE, 8:RSI_8_CLOSE, 9:RSI_9_CLOSE, 10:RSI_10_CLOSE, 11:RSI_11_CLOSE, 12:RSI_12_CLOSE, 13:RSI_13_CLOSE, 14:RSI_14_CLOSE
-[2025-08-17 16:22:12] INFO phase07 - [LOW]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
-[2025-08-17 16:22:12] INFO phase07 - [HIGH]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
-[2025-08-17 16:22:12] INFO phase07 - [OPEN]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
-[2025-08-17 16:22:12] INFO phase07 - [MISSING] none
-[2025-08-17 16:22:12] INFO phase07 - [NANS]    RSI_2_CLOSE: head=1, total=1; RSI_14_CLOSE: head=13, total=13; RSI_3_CLOSE: head=2, total=2; RSI_4_CLOSE: head=3, total=3; RSI_5_CLOSE: head=4, total=4; RSI_6_CLOSE: head=5, total=5
-[2025-08-17 16:22:12] INFO phase07 - [BOUNDS]  All detected RSI columns within [0,100] beyond warm-up
-[2025-08-17 16:22:12] INFO phase07 - [ORDER]   sample_size=200 per period (where available)
-[2025-08-17 16:22:12] INFO phase07 - violations: p=2:0, p=3:0, p=4:0, p=5:0, p=6:0, p=7:0, p=8:0, p=9:0, p=10:0, p=11:0, p=12:0, p=13:0, p=14:0
-[2025-08-17 16:22:12] INFO phase07 - [LOG]     wrote logs/phase07_rsi_columns.log
+[2025-08-17 18:13:16] INFO phase07 - ====================================================
+[2025-08-17 18:13:16] INFO phase07 - Phase 7 — RSI Column Binding & Invariants
+[2025-08-17 18:13:16] INFO phase07 - ====================================================
+[2025-08-17 18:13:16] INFO phase07 - [PERIODS] detected=2..14 (count=13)
+[2025-08-17 18:13:16] INFO phase07 - [CLOSE]   2:RSI_2_CLOSE, 3:RSI_3_CLOSE, 4:RSI_4_CLOSE, 5:RSI_5_CLOSE, 6:RSI_6_CLOSE, 7:RSI_7_CLOSE, 8:RSI_8_CLOSE, 9:RSI_9_CLOSE, 10:RSI_10_CLOSE, 11:RSI_11_CLOSE, 12:RSI_12_CLOSE, 13:RSI_13_CLOSE, 14:RSI_14_CLOSE
+[2025-08-17 18:13:16] INFO phase07 - [LOW]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+[2025-08-17 18:13:16] INFO phase07 - [HIGH]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+[2025-08-17 18:13:16] INFO phase07 - [OPEN]    present for: 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+[2025-08-17 18:13:16] INFO phase07 - [MISSING] none
+[2025-08-17 18:13:16] INFO phase07 - [NANS]    RSI_2_CLOSE: head=1, total=1; RSI_14_CLOSE: head=13, total=13; RSI_3_CLOSE: head=2, total=2; RSI_4_CLOSE: head=3, total=3; RSI_5_CLOSE: head=4, total=4; RSI_6_CLOSE: head=5, total=5
+[2025-08-17 18:13:16] INFO phase07 - [BOUNDS]  All detected RSI columns within [0,100] beyond warm-up
+[2025-08-17 18:13:16] INFO phase07 - [ORDER]   sample_size=200 per period (where available)
+[2025-08-17 18:13:16] INFO phase07 - violations: p=2:0, p=3:0, p=4:0, p=5:0, p=6:0, p=7:0, p=8:0, p=9:0, p=10:0, p=11:0, p=12:0, p=13:0, p=14:0
+[2025-08-17 18:13:16] INFO phase07 - [LOG]     wrote logs/phase07_rsi_columns.log
