@@ -1,10 +1,10 @@
-[2025-08-17 09:35:09] INFO phase04 - =====================================================
-[2025-08-17 09:35:09] INFO phase04 - Phase 4 — Date Window Trim & Buffer Check
-[2025-08-17 09:35:09] INFO phase04 - =====================================================
-[2025-08-17 09:35:09] INFO phase04 - [REQUEST] start=2025-01-01, end=2025-07-01, buffer_days=30, max_rsi_period=2
-[2025-08-17 09:35:09] INFO phase04 - [EFFECTIVE RANGE] 2024-12-02 → 2025-07-01
-[2025-08-17 09:35:09] INFO phase04 - [DATA RANGE]      2010-07-19 → 2025-07-18
-[2025-08-17 09:35:09] INFO phase04 - [TRIMMED RANGE]   2024-12-02 → 2025-07-01
-[2025-08-17 09:35:09] INFO phase04 - [ROWS] total=3774, trimmed=144, dropped_pre=3618, dropped_post=12
-[2025-08-17 09:35:09] INFO phase04 - [BUFFER] warmup_rows_between(2024-12-02, 2025-01-01)=21, required=2, ok=True
-[2025-08-17 09:35:09] INFO phase04 - [LOG] Wrote: logs/phase04_window.log
+[2025-08-17 10:09:54] INFO phase04 - =====================================================
+[2025-08-17 10:09:54] INFO phase04 - Phase 4 — Date Window Trim & Buffer Check
+[2025-08-17 10:09:54] INFO phase04 - =====================================================
+[2025-08-17 10:09:54] INFO phase04 - [REQUEST] start=2010-01-01, end=2025-07-01, buffer_days=30, max_rsi_period=2
+[2025-08-17 10:09:54] INFO phase04 - [EFFECTIVE RANGE] 2009-12-02 → 2025-07-01
+[2025-08-17 10:09:54] INFO phase04 - [DATA RANGE]      2010-07-19 → 2025-07-18
+[2025-08-17 10:09:54] INFO phase04 - [TRIMMED RANGE]   2010-07-19 → 2025-07-01
+[2025-08-17 10:09:54] INFO phase04 - [ROWS] total=3774, trimmed=3762, dropped_pre=0, dropped_post=12
+[2025-08-17 10:09:54] INFO phase04 - [BUFFER] warmup_rows_between(2009-12-02, 2010-01-01)=0, required=2, ok=False
+[2025-08-17 10:09:54] INFO phase04 - [LOG] Wrote: logs/phase04_window.log

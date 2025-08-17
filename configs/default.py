@@ -3,7 +3,7 @@ SETTINGS = {
     "LOOKBACK_BUFFER_DAYS": 30,
     "SOXL": {
         "ACTIVE": True,
-        "START_DATE": "2025-01-01",
+        "START_DATE": "2010-01-01",
         "END_DATE": "2025-07-01",
         "INITIAL_CASH": 1000,
         "DAILY_CASH": 0,

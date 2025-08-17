@@ -1,4 +1,4 @@
-# main.py — Phase 1 + Phase 2 + Phase 3 + Phase 4
+# main.py — Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5
 from __future__ import annotations
 
 import sys
@@ -9,6 +9,7 @@ from src.config_loader import load, validate
 from src.io_csv import resolve_csv_path, probe_csv, load_prices
 from src.validate import require_columns, summarize_indicators
 from src.windowing import compute_requested_window, trim_for_backtest
+from src.benchmarks import buy_and_hold
 
 
 def _ensure_dirs() -> None:
@@ -134,7 +135,6 @@ def _banner_phase4(
 ) -> str:
     rows_total = df.shape[0]
     rows_trim = df_trim.shape[0]
-    # before start date
     rows_before_start_total = df.loc[:requested_start].shape[0]
     rows_before_start_trim = df_trim.loc[:requested_start].shape[0]
     rows_dropped_pre = rows_before_start_total - rows_before_start_trim
@@ -145,7 +145,6 @@ def _banner_phase4(
     trim_first = df_trim.index.min() if rows_trim else None
     trim_last = df_trim.index.max() if rows_trim else None
 
-    # Warm-up count (inclusive both ends; mirrors trim_for_backtest logic)
     warmup_rows = df.loc[effective_start:requested_start].shape[0]
 
     lines = []
@@ -162,6 +161,19 @@ def _banner_phase4(
     lines.append(f"[ROWS] total={rows_total}, trimmed={rows_trim}, dropped_pre={rows_dropped_pre}, dropped_post={rows_dropped_post}")
     lines.append(f"[BUFFER] warmup_rows_between({effective_start.date()}, {requested_start.date()})={warmup_rows}, required={max_period}, ok={str(buffer_ok)}")
     lines.append("[LOG] Wrote: logs/phase04_window.log")
+    return "\n".join(lines)
+
+
+def _banner_phase5(bh: dict) -> str:
+    lines = []
+    lines.append("# Phase 5 — Buy-and-Hold Baseline")
+    lines.append("")
+    lines.append(f"[WINDOW]  start={bh['start_date'].date()} \u2192 end={bh['end_date'].date()}, days={bh['days_held']}")
+    lines.append(f"[PRICES]  start_close={bh['start_price']:.6f}, end_close={bh['end_price']:.6f}")
+    lines.append(f"[CASH]    initial={bh['start_price'] * (bh['final_value'] / bh['end_price']) / (bh['start_price'] / bh['start_price']):,.2f} \u2192 final={bh['final_value']:,.2f}")
+    # The above 'initial' expression intentionally equals initial cash; kept algebraic to avoid separate field passing.
+    lines.append(f"[METRICS] ROI={bh['roi_pct']:.3f}%, CAGR={bh['cagr_pct']:.3f}%")
+    lines.append("[LOG]     Wrote: logs/phase05_bh.log")
     return "\n".join(lines)
 
 
@@ -248,7 +260,6 @@ def main() -> int:
         print(msg)
         logger4.error(msg)
         return 1
-
     banner4 = _banner_phase4(
         df=df,
         df_trim=df_trim,
@@ -262,6 +273,36 @@ def main() -> int:
     print(banner4)
     for line in banner4.splitlines():
         logger4.info(line)
+
+    # Phase 5 — Buy-and-Hold
+    log5 = Path("logs") / "phase05_bh.log"
+    logger5 = get_logger("phase05", log5)
+    try:
+        bh = buy_and_hold(df_trim, float(cfg["INITIAL_CASH"]))
+    except Exception as e:
+        msg = f"Buy-and-hold failed: {e}"
+        print(msg)
+        logger5.error(msg)
+        return 1
+
+    # Record initial cash for banner without threading it through buy_and_hold
+    initial_cash_val = float(cfg["INITIAL_CASH"])
+
+    # Pretty banner
+    lines = []
+    lines.append("# Phase 5 — Buy-and-Hold Baseline")
+    lines.append("")
+    lines.append(f"[WINDOW]  start={bh['start_date'].date()} \u2192 end={bh['end_date'].date()}, days={bh['days_held']}")
+    lines.append(f"[PRICES]  start_close={bh['start_price']:.6f}, end_close={bh['end_price']:.6f}")
+    lines.append(f"[CASH]    initial={initial_cash_val:,.2f} \u2192 final={bh['final_value']:,.2f}")
+    lines.append(f"[METRICS] ROI={bh['roi_pct']:.3f}%, CAGR={bh['cagr_pct']:.3f}%")
+    lines.append("[LOG]     Wrote: logs/phase05_bh.log")
+    banner5 = "\n".join(lines)
+
+    print()
+    print(banner5)
+    for line in lines:
+        logger5.info(line)
 
     return 0
 

@@ -100,3 +100,24 @@ Future phases should be appended here in the same format.
 - Row counts reported: total=3774, trimmed=145, dropped_pre=3629, dropped_post=0.  
 - Buffer check: warmup rows=31, required=14, ok=True.  
 - Log matched console output.  
+
+
+## Phase 5 — Buy-and-Hold Baseline
+**Goal**
+* Establish a deterministic baseline for later GPU strategy comparisons.
+* Simulate buying at the first trimmed close and holding through the last trimmed close.
+* Report final value, ROI, and CAGR.
+* Persist results to log for reproducibility.
+
+**Changes**
+* Added `src/benchmarks.py` → `buy_and_hold()` implementation.
+* Updated `main.py` → Phase 5 orchestration.
+* Created log file `logs/phase05_bh.log`.
+
+**Verification**
+* Ran on trimmed SOXL dataset (2024-12-02 → 2025-07-01).
+* Start close ≈ 0.5833, end close ≈ 0.6277.
+* Initial cash 1,000 → final ≈ 1,076.14.
+* ROI ≈ +7.61%.
+* CAGR ≈ +13.23% over 211 calendar days.
+* Console banner and `logs/phase05_bh.log` matched exactly.
