@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import numpy as np
+import src.regimes as regimes
 
 from src.logging_setup import get_logger
 from src.config_loader import load, validate
@@ -11,9 +13,11 @@ from src.validate import require_columns
 from src.windowing import compute_requested_window, trim_for_backtest
 from src.benchmarks import buy_and_hold
 from src.gpu_backend import select_backend, sanity_compute_check, select_backend
-from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8
+from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8, phase9
 from src.columns import detect_rsi_columns, analyze_rsi_invariants
 from src.signals_gpu import make_buy_sell_masks
+
+
 
 
 def _ensure_dirs() -> None:
@@ -193,14 +197,13 @@ def main() -> int:
         buy_thr  = float(min(cfg.get("BUY_THRESHOLDS", [24])))
         sell_thr = float(max(cfg.get("SELL_THRESHOLDS", [90])))
 
-        regime_mask = None  # optional, will add in Phase 9
+        # IMPORTANT: do not shadow regimes.regime_mask()
+        REGIME_MASK_HOST = None  # optional; Phase 9 will provide one later
 
-        # GPU backend: select_backend returns a dict with CuPy as 'xp'
-        backend = select_backend("cupy")
+        backend = select_backend("cupy")  # dict with 'xp'
         cp = backend["xp"]
 
-        # Build masks (you may pass either 'cp' or the whole 'backend' dict; both now work)
-        close_map = RSI_MAPS["close_map"]  # produced in Phase 7
+        close_map = RSI_MAPS["close_map"]  # from Phase 7
         buy_ok_dev, sell_ok_dev, meta = make_buy_sell_masks(
             df=df,
             close_map=close_map,
@@ -208,18 +211,16 @@ def main() -> int:
             sell_period=sell_period,
             buy_thr=buy_thr,
             sell_thr=sell_thr,
-            regime_mask_host=regime_mask,
-            cp=backend,  # pass backend dict so banner can use device_name/cc directly
+            regime_mask_host=REGIME_MASK_HOST,
+            cp=backend,  # pass backend dict or cp; both supported
         )
 
-        # Banner
         banner8 = phase8.build_banner(meta)
         print()
         print(banner8)
         for line in banner8.splitlines():
             logger8.info(line)
 
-        # Keep device masks for later phases
         GPU_BUY_MASK = buy_ok_dev
         GPU_SELL_MASK = sell_ok_dev
 
@@ -231,6 +232,72 @@ def main() -> int:
     # ---- End Phase 8 ----
 
 
+    log9_path = Path("logs") / "phase09_regimes.log"
+    logger9 = get_logger("phase09", log9_path)
+    
+    try:
+        gap_ranges = cfg.get("GAP_RANGES", [])
+        if not isinstance(gap_ranges, (list, tuple)) or not gap_ranges:
+            raise ValueError("GAP_RANGES must be a non-empty list of (low, high) tuples.")
+        for rng in gap_ranges:
+            if not (isinstance(rng, (list, tuple)) and len(rng) == 2):
+                raise ValueError(f"Invalid GAP_RANGES entry: {rng!r} (expected 2-tuple)")
+
+        # Compute MA_GAP and attach
+        ma_gap = regimes.compute_ma_gap(df)
+        if ma_gap.dtype != "float64":
+            raise TypeError(f"MA_GAP must be float64, got {ma_gap.dtype}")
+        if not np.isfinite(ma_gap.dropna().to_numpy()).all():
+            raise ValueError("MA_GAP contains inf or -inf values after denominator guard.")
+
+        # Label by ranges and attach
+        reg = regimes.label_by_ranges(df, gap_ranges)
+        labels = regimes.generate_regime_labels(gap_ranges)
+
+        # Counts and samples
+        counts = {lab: int((reg == lab).sum()) for lab in labels}
+        samples: dict[str, list[str]] = {}
+        for lab in labels:
+            idx = df.index[(reg == lab)]
+            samples[lab] = [str(d) for d in idx[:3]]
+
+        non_null = int(ma_gap.notna().sum())
+        total = int(ma_gap.shape[0])
+        fv_idx = ma_gap.first_valid_index()
+        first_valid = str(fv_idx) if fv_idx is not None else None
+
+        banner9 = phase9.build_banner(
+            gap_ranges=gap_ranges,
+            ma_gap_dtype=str(ma_gap.dtype),
+            non_null=non_null,
+            total=total,
+            first_valid=first_valid,
+            labels=labels,
+            counts=counts,
+            samples=samples,
+        )
+        print()
+        print(banner9)
+        for line in banner9.splitlines():
+            logger9.info(line)
+
+        # Choose a regime and build a host mask for later phases
+        mid_idx = len(labels) // 2
+        CHOSEN_REGIME_LABEL = labels[mid_idx] if labels else "gap_all"
+
+        # Guard against accidental shadowing: regimes.regime_mask must be callable
+        if not callable(getattr(regimes, "regime_mask", None)):
+            raise RuntimeError("Phase 9 internal error: regimes.regime_mask is not callable (name shadowed).")
+
+        REGIME_MASK_HOST = regimes.regime_mask(df, CHOSEN_REGIME_LABEL)
+        REGIME_LABELS = labels
+
+    except Exception as e:
+        msg = f"Phase 9 failed: {e}"
+        print(msg)
+        logger9.error(msg)
+        sys.exit(1)
+    # ---- End Phase 9 ----
 
 
     return 0
