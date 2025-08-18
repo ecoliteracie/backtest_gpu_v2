@@ -304,3 +304,42 @@ Phase 8: GPU predicate masks from precomputed RSI
 * `MA_GAP` aligned to `df.index`, float64, no ±inf.
 * Every non-NaN `MA_GAP` row maps to exactly one regime via `< high` upper-bound rule.
 * Handles degenerate `GAP_RANGES=[(None,None)]` as a single regime.
+
+
+
+## Phase 10 — GPU Predicate Masks + Regime Split
+
+Goal
+- Combine Phase 8’s GPU predicate masks with Phase 9’s regime labels.
+- Report buy/sell counts and sample dates per regime, and reconcile totals strictly within the MA_GAP domain (non-NaN rows).
+
+Changes
+- Added src/banners/phase10.py for a multi-section banner with per-regime counts/samples and integrity checks.
+- Updated main.py Phase-10 block to:
+  - Intersect device masks with each regime’s host mask (moved to device).
+  - Reconcile totals against the MA_GAP domain (exclude warm-up NaNs).
+  - Optionally report a diagnostic “gap_(NaN)” bucket for signals occurring in the NaN region.
+  - Verify regimes are mutually exclusive and collectively exhaustive over non-NaN rows.
+  - Audit boundary assignments for [low, high) edges using a small tolerance.
+- Mirrored console to logs/phase10_masks_by_regime.log.
+
+Result (SOXL, RSI(2), buy_thr=24, sell_thr=90)
+- Totals (all rows): buy=56, sell=339
+- Totals in MA_GAP domain: buy=53, sell=318
+- Sum per regime: buy=53, sell=318  → matches domain totals
+- NaN-domain diagnostics: buy=3, sell=21 (warm-up region)
+- Overlaps=0, holes=0, boundaries sane
+- Log: logs/phase10_masks_by_regime.log
+
+Acceptance
+- Per-regime counts sum exactly to domain totals.
+- Samples are drawn only from in-domain rows where predicates are true.
+- Integrity checks pass (no overlaps, no holes).
+
+Commit Message
+Phase 10: Masks by regime with domain reconciliation and integrity checks
+
+- Intersect GPU masks with regime masks on device
+- Reconcile to MA_GAP domain; add NaN diagnostics
+- Overlap/hole checks and boundary audit
+- Banner + logging to phase10_masks_by_regime.log

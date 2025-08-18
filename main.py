@@ -12,10 +12,11 @@ from src.io_csv import resolve_csv_path, probe_csv, load_prices
 from src.validate import require_columns
 from src.windowing import compute_requested_window, trim_for_backtest
 from src.benchmarks import buy_and_hold
-from src.gpu_backend import select_backend, sanity_compute_check, select_backend
-from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8, phase9
+from src.gpu_backend import select_backend, sanity_compute_check, select_backend    
+from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8, phase9, phase10
 from src.columns import detect_rsi_columns, analyze_rsi_invariants
 from src.signals_gpu import make_buy_sell_masks
+
 
 
 
@@ -298,6 +299,203 @@ def main() -> int:
         logger9.error(msg)
         sys.exit(1)
     # ---- End Phase 9 ----
+
+
+    log10_path = Path("logs") / "phase10_masks_by_regime.log"
+    logger10 = get_logger("phase10", log10_path)
+
+    try:
+        # Parameters (single combo, as in Phase 8)
+        rsi_periods = list(sorted(cfg.get("RSI_PERIODS", [2])))
+        buy_period  = int(rsi_periods[0])
+        sell_period = int(rsi_periods[0])
+        buy_thr  = float(min(cfg.get("BUY_THRESHOLDS", [24])))
+        sell_thr = float(max(cfg.get("SELL_THRESHOLDS", [90])))
+
+        # GPU backend
+        try:
+            cp  # noqa: F821
+        except NameError:
+            backend = select_backend("cupy")
+            cp = backend["xp"]
+        else:
+            try:
+                backend = select_backend("cupy")
+            except Exception:
+                backend = {"xp": cp, "device_name": "Unknown", "cc": "?"}
+
+        # Ensure masks exist (reuse Phase 8 or build now)
+        try:
+            GPU_BUY_MASK  # noqa: F821
+            GPU_SELL_MASK # noqa: F821
+        except NameError:
+            close_map = RSI_MAPS["close_map"]
+            GPU_BUY_MASK, GPU_SELL_MASK, meta8 = make_buy_sell_masks(
+                df=df,
+                close_map=close_map,
+                buy_period=buy_period,
+                sell_period=sell_period,
+                buy_thr=buy_thr,
+                sell_thr=sell_thr,
+                regime_mask_host=None,
+                cp=backend,
+            )
+
+        # 1) Totals on all rows
+        buy_all  = int(cp.count_nonzero(GPU_BUY_MASK).item())
+        sell_all = int(cp.count_nonzero(GPU_SELL_MASK).item())
+
+        # 2) Restrict to MA_GAP domain (non-NaN)
+        if "MA_GAP" not in df.columns:
+            raise RuntimeError("Phase 10 requires df['MA_GAP'] from Phase 9.")
+
+        in_domain_host = (~df["MA_GAP"].isna()).to_numpy(dtype=bool, copy=False)
+        assert in_domain_host.shape[0] == len(df.index), "in_domain mask misaligned"
+        in_domain_dev  = cp.asarray(in_domain_host, dtype=cp.bool_)
+
+        buy_dom  = int(cp.count_nonzero(GPU_BUY_MASK & in_domain_dev).item())
+        sell_dom = int(cp.count_nonzero(GPU_SELL_MASK & in_domain_dev).item())
+        buy_nan  = buy_all - buy_dom
+        sell_nan = sell_all - sell_dom
+
+        # 3) Per-regime counts & samples (only within domain)
+        labels = REGIME_LABELS if 'REGIME_LABELS' in globals() else regimes.generate_regime_labels(cfg.get("GAP_RANGES", []))
+        per_blocks = []
+        sum_buy = 0
+        sum_sell = 0
+
+        # Build and retain host masks to run integrity checks
+        host_masks: dict[str, np.ndarray] = {}
+        for lab in labels:
+            m_host = regimes.regime_mask(df, lab)  # excludes NaN domain by construction
+            if m_host.dtype != bool:
+                m_host = m_host.astype(bool, copy=False)
+            assert m_host.shape[0] == len(df.index), f"regime mask misaligned for {lab}"
+            host_masks[lab] = m_host
+
+            dev_mask = cp.asarray(m_host, dtype=cp.bool_)
+            # constrain explicitly to domain for samples (redundant but clear)
+            dev_mask &= in_domain_dev
+
+            buy_reg  = GPU_BUY_MASK & dev_mask
+            sell_reg = GPU_SELL_MASK & dev_mask
+
+            cnt_buy  = int(cp.count_nonzero(buy_reg).item())
+            cnt_sell = int(cp.count_nonzero(sell_reg).item())
+            sum_buy  += cnt_buy
+            sum_sell += cnt_sell
+
+            def _dates_from_mask(mask_dev, k=5):
+                idx_dev = cp.where(mask_dev)[0]
+                if idx_dev.size == 0:
+                    return []
+                idx_host = cp.asnumpy(idx_dev[:k]).tolist()
+                return [str(df.index[i]) for i in idx_host]
+
+            samples_buy  = _dates_from_mask(buy_reg, 5)
+            samples_sell = _dates_from_mask(sell_reg, 5)
+
+            per_blocks.append({
+                "label": lab,
+                "counts": {"buy_ok": cnt_buy, "sell_ok": cnt_sell},
+                "samples": {"buy": samples_buy, "sell": samples_sell},
+            })
+
+        # 4) Optional "NaN regime" diagnostics (signals outside MA_GAP domain)
+        per_nan = None
+        if buy_nan > 0 or sell_nan > 0:
+            nan_mask_dev = ~in_domain_dev
+            buy_nan_mask = GPU_BUY_MASK & nan_mask_dev
+            sell_nan_mask = GPU_SELL_MASK & nan_mask_dev
+
+            def _dates_from_mask(mask_dev, k=5):
+                idx_dev = cp.where(mask_dev)[0]
+                if idx_dev.size == 0:
+                    return []
+                idx_host = cp.asnumpy(idx_dev[:k]).tolist()
+                return [str(df.index[i]) for i in idx_host]
+
+            samples_buy_nan  = _dates_from_mask(buy_nan_mask, 5)
+            samples_sell_nan = _dates_from_mask(sell_nan_mask, 5)
+            per_nan = {
+                "label": "gap_(NaN)",
+                "counts": {"buy_ok": buy_nan, "sell_ok": sell_nan},
+                "samples": {"buy": samples_buy_nan, "sell": samples_sell_nan},
+            }
+            per_blocks.append(per_nan)
+
+        # 5) Integrity checks (host-side)
+        # Overlaps: rows assigned to more than one regime (should be zero)
+        n = len(df.index)
+        overlaps_mask_total = np.zeros(n, dtype=bool)
+        first_overlap_date = None
+        labs = list(labels)
+        for i in range(len(labs)):
+            mi = host_masks[labs[i]]
+            for j in range(i + 1, len(labs)):
+                mj = host_masks[labs[j]]
+                ov = mi & mj
+                if ov.any():
+                    overlaps_mask_total |= ov
+                    if first_overlap_date is None:
+                        first_overlap_date = str(df.index[np.argmax(ov)])
+        overlap_count = int(overlaps_mask_total.sum())
+
+        # Holes: domain rows not covered by any regime
+        union_mask = np.zeros(n, dtype=bool)
+        for lab in labs:
+            union_mask |= host_masks[lab]
+        hole_mask = in_domain_host & (~union_mask)
+        hole_count = int(hole_mask.sum())
+        first_hole_date = str(df.index[np.argmax(hole_mask)]) if hole_count > 0 else None
+
+        # Boundary audit: verify [low, high) assignment at edges
+        gr = cfg.get("GAP_RANGES", [])
+        boundaries = sorted({float(b) for ab in gr for b in ab if b is not None})
+        boundary_assignments: dict[str, dict[str, int]] = {}
+        if boundaries:
+            ma_gap = df["MA_GAP"].to_numpy(dtype=np.float64, copy=False)
+            reg_series = df["REGIME"].astype("object")
+            labels_canon = regimes.generate_regime_labels(gr)
+            for b in boundaries:
+                # rows "equal" to boundary (tolerance)
+                at_b = np.isclose(ma_gap, b, atol=1e-12, rtol=0.0)
+                dest_counts: dict[str, int] = {}
+                if at_b.any():
+                    # Count by actual label
+                    for lab in labels_canon:
+                        dest_counts[lab] = int(((reg_series == lab).to_numpy() & at_b).sum())
+                boundary_assignments[str(b)] = dest_counts
+
+        # 6) Compose banner
+        meta10 = {
+            "params": {"buy_period": buy_period, "sell_period": sell_period, "buy_thr": buy_thr, "sell_thr": sell_thr},
+            "totals": {"buy_all": buy_all, "sell_all": sell_all, "buy_dom": sum_buy*0 + buy_dom, "sell_dom": sum_sell*0 + sell_dom,
+                    "buy_nan": buy_nan, "sell_nan": sell_nan},
+            "backend": {"name": backend.get("device_name", "Unknown"), "cc": backend.get("cc", "?")},
+            "per_regime": per_blocks,
+            "checks": {
+                "sum_buy": sum_buy, "sum_sell": sum_sell,
+                "overlaps": {"count": overlap_count, "first_date": first_overlap_date},
+                "holes":    {"count": hole_count,   "first_date": first_hole_date},
+                "boundary_assignments": boundary_assignments,
+            },
+        }
+
+        banner10 = phase10.build_banner(meta10)
+        print()
+        print(banner10)
+        for line in banner10.splitlines():
+            logger10.info(line)
+
+    except Exception as e:
+        msg = f"Phase 10 failed: {e}"
+        print(msg)
+        logger10.error(msg)
+        sys.exit(1)
+    # ---- End Phase 10 ----
+
+
 
 
     return 0
