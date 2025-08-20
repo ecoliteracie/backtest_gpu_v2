@@ -343,3 +343,41 @@ Phase 10: Masks by regime with domain reconciliation and integrity checks
 - Reconcile to MA_GAP domain; add NaN diagnostics
 - Overlap/hole checks and boundary audit
 - Banner + logging to phase10_masks_by_regime.log
+
+
+## Phase 11 — GPU Event Pairing + CPU Pricing
+
+**Goal**
+Implemented a two-pass system for position-aware trade event generation: GPU kernel handles predicate/position logic, CPU resolves exact trade prices using RSI LOW/HIGH and binary search fallback.
+
+**Changes**
+
+* Added `gpu_events.py` with Numba @cuda.jit kernel for parallel event streams.
+* Added `price_solver.py` for CPU binary search pricing.
+* Added `sim_core.py` to orchestrate CPU pricing and CSV output.
+* Added Phase-11 banner (`banners/phase11.py`) and logging.
+* Updated `main.py` to run Phase 11 and write trades CSV files.
+
+**Logic**
+
+* GPU sequential scan per combo enforces position state: only buy when flat, sell when long.
+* Events are masked by selected regime from Phase 9.
+* CPU pass computes trade price:
+
+  * **FAST\_HIGH/FAST\_LOW** when RSI\_LOW and RSI\_HIGH both confirm threshold side.
+  * **BSOLVE** using binary search otherwise.
+  * **NO\_SOLUTION** logged if solver fails.
+* Each trade row logs:
+  `date, action, buy_period, buy_thr, sell_period, sell_thr, rsi_low_at_d, rsi_high_at_d, condition_met, price, mode, reason`.
+
+**Outputs**
+
+* Phase banner + `logs/phase11_events.log`
+* Regime-segmented trades CSV (`logs/trades_<symbol>__<regime>__<params>__<timestamp>.csv`)
+
+**Verification**
+
+* Trade counts per regime ≤ Phase-10 predicate counts.
+* Buy/Sell sequence parity holds (#buys = #sells ±1).
+* Solver calls reported in banner (FAST vs BSOLVE vs NO\_SOLUTION).
+* CSV files contain only days where conditions were met (actions-only log).

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import itertools
 import numpy as np
 import src.regimes as regimes
 
@@ -13,11 +14,11 @@ from src.validate import require_columns
 from src.windowing import compute_requested_window, trim_for_backtest
 from src.benchmarks import buy_and_hold
 from src.gpu_backend import select_backend, sanity_compute_check, select_backend    
-from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8, phase9, phase10
+from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7, phase8, phase9, phase10, phase11
 from src.columns import detect_rsi_columns, analyze_rsi_invariants
 from src.signals_gpu import make_buy_sell_masks
-
-
+from src.gpu_events import build_event_streams
+from src.sim_core import simulate_once_from_events
 
 
 
@@ -494,6 +495,91 @@ def main() -> int:
         logger10.error(msg)
         sys.exit(1)
     # ---- End Phase 10 ----
+
+
+    # ---- Phase 11: GPU Event Pairing + CPU Pricing ----
+    log11_path = Path("logs") / "phase11_events.log"
+    logger11 = get_logger("phase11", log11_path)
+
+    try:
+        # Build a small validation grid (reuse your cfg)
+        buy_periods  = list(sorted(set(cfg.get("RSI_PERIODS", [2]))))[:2]
+        sell_periods = buy_periods[:]
+        buy_thrs  = list(sorted(set(cfg.get("BUY_THRESHOLDS", [24]))))[:2]
+        sell_thrs = list(sorted(set(cfg.get("SELL_THRESHOLDS", [90]))))[:2]
+
+        combos = []
+        for bp, sp, bt, st in itertools.product(buy_periods, sell_periods, buy_thrs, sell_thrs):
+            if bt >= st:
+                continue
+            combos.append((int(bp), int(sp), float(bt), float(st)))
+        if not combos:
+            raise ValueError("Phase 11: no valid parameter combos (check thresholds).")
+
+        # Regime labels from Phase 9; fall back to config if needed
+        labels = REGIME_LABELS if 'REGIME_LABELS' in globals() else regimes.generate_regime_labels(cfg.get("GAP_RANGES", []))
+        if not labels:
+            labels = ["gap_all"]
+
+        backend = select_backend("cupy")
+        gpu_info = {"name": backend.get("device_name", "Unknown"), "cc": backend.get("cc", "?")}
+
+        tol_pct = float(cfg.get("RSI_TOLERANCE_PCT", 0.001))
+
+        # Iterate over every regime label and produce one trades CSV per label (for the first combo)
+        for label in labels:
+            regime_mask_host = regimes.regime_mask(df, label)
+
+            streams = build_event_streams(
+                df=df,
+                rsi_maps=RSI_MAPS,
+                regime_mask_host=regime_mask_host,
+                combos=combos,
+                backend="auto",  # safe fallback if Numba can't handle cc=12.x
+            )
+            events_type = streams["events_type"]  # (C,T)
+            C, T = events_type.shape
+
+            # Price the first combo's events to a CSV (replicate for all combos if desired)
+            sim_res = simulate_once_from_events(
+                df=df,
+                rsi_maps=RSI_MAPS,
+                events_type_1d=events_type[0],
+                combo=combos[0],
+                tolerance_pct=tol_pct,
+                cfg=cfg,
+                regime_label=label,
+                out_dir="logs",
+            )
+
+            # Aggregate pair counts across combos for this label (sanity)
+            paired_all = 0
+            for i in range(C):
+                ev = events_type[i]
+                b = int(np.count_nonzero(ev == 1))
+                s = int(np.count_nonzero(ev == 2))
+                paired_all += min(b, s)
+
+            # Banner per label (mirrored to log)
+            meta11 = {
+                "grid": {"C": C, "regime": label, "T": T},
+                "gpu": gpu_info,
+                "pair": {"paired": int(paired_all), "overflow": 0},
+                "price": {"solver_stats": sim_res["solver_stats"]},
+                "out": {"trades_csv": sim_res["trades_path"]},
+            }
+            banner11 = phase11.build_banner(meta11)
+            print()
+            print(banner11)
+            for line in banner11.splitlines():
+                logger11.info(line)
+
+    except Exception as e:
+        msg = f"Phase 11 failed: {e}"
+        print(msg)
+        logger11.error(msg)
+        sys.exit(1)
+    # ---- End Phase 11 ----
 
 
 

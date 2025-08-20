@@ -1,0 +1,9 @@
+[2025-08-20 15:56:30] INFO phase11 - ====================================================
+[2025-08-20 15:56:30] INFO phase11 - Phase 11 — GPU Event Pairing + CPU Pricing
+[2025-08-20 15:56:30] INFO phase11 - ====================================================
+[2025-08-20 15:56:30] INFO phase11 - [GRID ] combos=1, regime=gap_(None,None), days=3774
+[2025-08-20 15:56:30] INFO phase11 - [GPU  ] device=NVIDIA GeForce RTX 5060, cc=12.0
+[2025-08-20 15:56:30] INFO phase11 - [PAIR ] paired_trades=37   overflow_combos=0
+[2025-08-20 15:56:30] INFO phase11 - [PRICE] solver calls: buy(BSOLVE=34, FAST=3), sell(BSOLVE=23, FAST=14), no_solution=0
+[2025-08-20 15:56:30] INFO phase11 - [RESULT] wrote logs\trades_SOXL__gap_(None,None)__2_24_2_90__20250820_155630.csv
+[2025-08-20 15:56:30] INFO phase11 - [LOG]    wrote logs/phase11_events.log
