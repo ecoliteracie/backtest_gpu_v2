@@ -1,9 +1,9 @@
-[2025-08-20 15:56:30] INFO phase08 - =====================================================
-[2025-08-20 15:56:30] INFO phase08 - Phase 8 — GPU Buy/Sell Predicate Masks
-[2025-08-20 15:56:30] INFO phase08 - =====================================================
-[2025-08-20 15:56:30] INFO phase08 - [PARAMS] buy_period=2, sell_period=2, buy_thr=24.0, sell_thr=90.0
-[2025-08-20 15:56:30] INFO phase08 - [COUNTS] buy_ok=56, sell_ok=339
-[2025-08-20 15:56:30] INFO phase08 - [SAMPLES] buy idx: 2010-08-16 00:00:00, 2011-03-08 00:00:00, 2011-04-13 00:00:00, 2011-05-04 00:00:00, 2011-06-09 00:00:00 | sell idx: 2010-10-13 00:00:00, 2010-10-28 00:00:00, 2010-10-29 00:00:00, 2010-11-04 00:00:00, 2010-11-05 00:00:00
-[2025-08-20 15:56:30] INFO phase08 - [REGIME] applied=None, true_count=3774
-[2025-08-20 15:56:30] INFO phase08 - [BACKEND] CuPy device=NVIDIA GeForce RTX 5060, cc=12.0
-[2025-08-20 15:56:30] INFO phase08 - [LOG]     wrote logs/phase08_masks_gpu.log
+[2025-08-20 20:06:11] INFO phase08 - =====================================================
+[2025-08-20 20:06:11] INFO phase08 - Phase 8 — GPU Buy/Sell Predicate Masks
+[2025-08-20 20:06:11] INFO phase08 - =====================================================
+[2025-08-20 20:06:11] INFO phase08 - [PARAMS] buy_period=2, sell_period=2, buy_thr=24.0, sell_thr=90.0
+[2025-08-20 20:06:11] INFO phase08 - [COUNTS] buy_ok=56, sell_ok=339
+[2025-08-20 20:06:11] INFO phase08 - [SAMPLES] buy idx: 2010-08-16 00:00:00, 2011-03-08 00:00:00, 2011-04-13 00:00:00, 2011-05-04 00:00:00, 2011-06-09 00:00:00 | sell idx: 2010-10-13 00:00:00, 2010-10-28 00:00:00, 2010-10-29 00:00:00, 2010-11-04 00:00:00, 2010-11-05 00:00:00
+[2025-08-20 20:06:11] INFO phase08 - [REGIME] applied=None, true_count=3774
+[2025-08-20 20:06:11] INFO phase08 - [BACKEND] CuPy device=NVIDIA GeForce RTX 5060, cc=12.0
+[2025-08-20 20:06:11] INFO phase08 - [LOG]     wrote logs/phase08_masks_gpu.log

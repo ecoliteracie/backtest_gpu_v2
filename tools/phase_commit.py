@@ -51,7 +51,7 @@ def has_changes(dry=False):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--phase", type=str, help="Phase number (e.g., 6, 10, 20)")
+    p.add_argument("--phase", type=str, help="Phase number (e.g., 6, 10.5, 20.1)")
     p.add_argument("--message", type=str, help='Commit message (default: "End of PhaseX")')
     p.add_argument("--branch", type=str, help="Branch to push (default: current branch)")
     p.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
@@ -61,15 +61,15 @@ def main():
     # Phase input
     phase_str = args.phase
     if not phase_str:
-        phase_str = input("Enter phase number (e.g., 6): ").strip()
+        phase_str = input("Enter phase number (e.g., 6, 10.5, 20.1): ").strip()
 
     # Validate phase
-    if not re.fullmatch(r"\d+", phase_str):
-        print("Error: phase must be a positive integer like 6 or 10 or 20.")
+    if not re.fullmatch(r"\d+(\.\d+)?", phase_str):
+        print("Error: phase must be a positive number like 6, 10.5, or 20.1.")
         sys.exit(1)
 
-    phase = int(phase_str)
-    tag = f"v{phase}.0.0"
+    phase = float(phase_str)
+    tag = f"v{phase:.1f}.0" if "." in phase_str else f"v{int(phase)}.0.0"
     commit_msg = args.message or f"End of Phase{phase}"
 
     try:

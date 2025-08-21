@@ -46,9 +46,10 @@ def simulate_once_from_events(
 
     header = [
         "date", "action", "buy_period", "buy_thr", "sell_period", "sell_thr",
-        "rsi_low_at_d", "rsi_high_at_d", "condition_met",
+        "rsi_low_at_d", "rsi_high_at_d", "rsi_close_at_d",  # <— added rsi_close_at_d
+        "condition_met",
         "price", "mode", "reason",
-        "low_price", "high_price"
+        "low_price", "high_price"  # <— already added previously
     ]
 
     solver_stats = {
@@ -63,51 +64,77 @@ def simulate_once_from_events(
         w = csv.writer(f)
         w.writerow(header)
 
-        for d, ev in enumerate(events_type_1d):
-            if ev == NONE:
-                continue
+        # Pre-resolve maps once
+        close_map = rsi_maps.get("close_map", {})
+        low_map   = rsi_maps.get("low_map", {})
+        high_map  = rsi_maps.get("high_map", {})
 
+        for d, ev in enumerate(events_type_1d):
             date_str = str(df.index[d])
+
+            # Default: treat non-event rows using the BUY period for RSI fields
             if ev == BUY:
                 side = "BUY"
                 period = buy_p
                 target = float(buy_thr)
-                buy_cnt += 1
             elif ev == SELL:
                 side = "SELL"
                 period = sell_p
                 target = float(sell_thr)
-                sell_cnt += 1
             else:
-                continue
+                side = "NONE"
+                period = buy_p     # choose buy_p for consistent per-day audit fields
+                target = float(buy_thr)
 
             # Bound prices
             lo_price = float(df["Low"].iloc[d])
             hi_price = float(df["High"].iloc[d])
 
-            # RSI bounds for the period (if available)
-            rsi_low_col  = low_map.get(period, None)
-            rsi_high_col = high_map.get(period, None)
-            rsi_low_val  = float(df[rsi_low_col].iloc[d])  if rsi_low_col  and rsi_low_col in df.columns  else np.nan
-            rsi_high_val = float(df[rsi_high_col].iloc[d]) if rsi_high_col and rsi_high_col in df.columns else np.nan
+            # RSI fields for the chosen period (close/low/high)
+            rsi_close_col = close_map.get(period, None)
+            rsi_low_col   = low_map.get(period, None)
+            rsi_high_col  = high_map.get(period, None)
 
-            # Fast-paths
+            rsi_close_val = float(df[rsi_close_col].iloc[d]) if rsi_close_col and rsi_close_col in df.columns else np.nan
+            rsi_low_val   = float(df[rsi_low_col].iloc[d])   if rsi_low_col   and rsi_low_col   in df.columns else np.nan
+            rsi_high_val  = float(df[rsi_high_col].iloc[d])  if rsi_high_col  and rsi_high_col  in df.columns else np.nan
+
+            # Non-event rows: write audit line and continue
+            if side == "NONE" or ev == NONE:
+                w.writerow([
+                    date_str, "NONE", buy_p, buy_thr, sell_p, sell_thr,
+                    rsi_low_val, rsi_high_val, rsi_close_val,
+                    "No",
+                    "", "", "",
+                    lo_price, hi_price
+                ])
+                continue
+
+            # Event rows (BUY/SELL) — preserve existing behavior:
             if side == "BUY" and np.isfinite(rsi_low_val) and np.isfinite(rsi_high_val):
                 if (rsi_low_val < target) and (rsi_high_val < target):
-                    w.writerow([date_str, side, buy_p, buy_thr, sell_p, sell_thr,
-                                rsi_low_val, rsi_high_val, "Yes",
-                                hi_price, "FAST_HIGH", "threshold already passed",
-                                lo_price, hi_price])
+                    w.writerow([
+                        date_str, side, buy_p, buy_thr, sell_p, sell_thr,
+                        rsi_low_val, rsi_high_val, rsi_close_val,
+                        "Yes",
+                        hi_price, "FAST_HIGH", "threshold already passed",
+                        lo_price, hi_price
+                    ])
                     solver_stats["fast_buy"] += 1
+                    buy_cnt += 1
                     continue
 
             if side == "SELL" and np.isfinite(rsi_low_val) and np.isfinite(rsi_high_val):
                 if (rsi_low_val > target) and (rsi_high_val > target):
-                    w.writerow([date_str, side, buy_p, buy_thr, sell_p, sell_thr,
-                                rsi_low_val, rsi_high_val, "Yes",
-                                lo_price, "FAST_LOW", "threshold already passed",
-                                lo_price, hi_price])
+                    w.writerow([
+                        date_str, side, buy_p, buy_thr, sell_p, sell_thr,
+                        rsi_low_val, rsi_high_val, rsi_close_val,
+                        "Yes",
+                        lo_price, "FAST_LOW", "threshold already passed",
+                        lo_price, hi_price
+                    ])
                     solver_stats["fast_sell"] += 1
+                    sell_cnt += 1
                     continue
 
             # Binary-search style solve via proxy (RSI_LOW/HIGH interpolation)
@@ -127,18 +154,33 @@ def simulate_once_from_events(
                 mode = "BSOLVE"
                 if side == "BUY":
                     solver_stats["bsolve_buy"] += 1
+                    buy_cnt += 1
                 else:
                     solver_stats["bsolve_sell"] += 1
-                w.writerow([date_str, side, buy_p, buy_thr, sell_p, sell_thr,
-                            rsi_low_val, rsi_high_val, "Yes",
-                            float(res["price"]), mode, f"iters={res['iterations']}",
-                            lo_price, hi_price])
+                    sell_cnt += 1
+
+                w.writerow([
+                    date_str, side, buy_p, buy_thr, sell_p, sell_thr,
+                    rsi_low_val, rsi_high_val, rsi_close_val,
+                    "Yes",
+                    float(res["price"]), mode, f"iters={res['iterations']}",
+                    lo_price, hi_price
+                ])
             else:
+                # Event flagged but unable to solve to tolerance — still log as not priced
                 solver_stats["no_solution"] += 1
-                w.writerow([date_str, side, buy_p, buy_thr, sell_p, sell_thr,
-                            rsi_low_val, rsi_high_val, "No",    
-                            "", "NO_SOLUTION", "unable to meet tolerance",
-                            lo_price, hi_price])
+                if side == "BUY":
+                    buy_cnt += 1
+                else:
+                    sell_cnt += 1
+                w.writerow([
+                    date_str, side, buy_p, buy_thr, sell_p, sell_thr,
+                    rsi_low_val, rsi_high_val, rsi_close_val,
+                    "No",
+                    "", "NO_SOLUTION", "unable to meet tolerance",
+                    lo_price, hi_price
+                ])
+
 
     paired = min(buy_cnt, sell_cnt)
     return {
