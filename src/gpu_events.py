@@ -14,15 +14,36 @@ except Exception:
 NONE, BUY, SELL = 0, 1, 2
 
 
-def _prepare_rsi_by_period(df, close_map: Dict[int, str]):
-    periods = sorted(close_map.keys())
+# Keep NONE, BUY, SELL = 0,1,2 as-is
+
+def _prepare_by_period(df, map_dict: Dict[int, str]) -> tuple[np.ndarray, list[int]]:
+    periods = sorted(map_dict.keys())
     T = len(df)
-    P = len(periods)
-    arr = np.empty((P, T), dtype=np.float64)
+    arr = np.empty((len(periods), T), dtype=np.float64)
     for i, p in enumerate(periods):
-        arr[i, :] = df[close_map[p]].to_numpy(np.float64, copy=False)
-    p2row = {p: i for i, p in enumerate(periods)}
-    return arr, periods, p2row
+        col = map_dict[p]
+        if col not in df.columns:
+            raise ValueError(f"Required RSI column missing: {col}")
+        arr[i, :] = df[col].to_numpy(np.float64, copy=False)
+    return arr, periods
+
+def _prepare_by_period_aligned(df, periods: list[int], map_dict: Dict[int, str]) -> np.ndarray:
+    T = len(df)
+    arr = np.empty((len(periods), T), dtype=np.float64)
+    for i, p in enumerate(periods):
+        col = map_dict.get(p)
+        if col is None or col not in df.columns:
+            raise ValueError(f"Required RSI column missing for period {p}")
+        arr[i, :] = df[col].to_numpy(np.float64, copy=False)
+    return arr
+
+def _band_ok_buy_vals(low_val: float, high_val: float, thr: float) -> bool:
+    # bracket OR entirely below threshold
+    return ((low_val <= thr) and (thr <= high_val)) or (high_val < thr)
+
+def _band_ok_sell_vals(low_val: float, high_val: float, thr: float) -> bool:
+    # bracket OR entirely above threshold
+    return ((low_val <= thr) and (thr <= high_val)) or (low_val > thr)
 
 
 def _numba_supported() -> tuple[bool, str]:
@@ -42,78 +63,79 @@ def _numba_supported() -> tuple[bool, str]:
         return False, f"probe failed: {e}"
 
 
-def _launch_numba_kernel(close, close_prev, rsi_by_period, regime_mask,
+def _launch_numba_kernel(rsi_closePT, rsi_lowPT, rsi_highPT, regime_mask,
                          buy_idx, sell_idx, buy_thr, sell_thr) -> np.ndarray:
     C = buy_idx.shape[0]
-    T = close.shape[0]
-
+    T = rsi_closePT.shape[1]
     events_type = np.zeros((C, T), dtype=np.int8)  # host buffer
 
-    d_close      = cuda.to_device(close)
-    d_close_prev = cuda.to_device(close_prev)
-    d_rsiPT      = cuda.to_device(rsi_by_period)                  # (P,T)
-    d_regime     = cuda.to_device(regime_mask.astype(np.bool_))   # (T,)
-    d_buy_idx    = cuda.to_device(buy_idx.astype(np.int32))
-    d_sell_idx   = cuda.to_device(sell_idx.astype(np.int32))
-    d_buy_thr    = cuda.to_device(buy_thr.astype(np.float64))
-    d_sell_thr   = cuda.to_device(sell_thr.astype(np.float64))
-    d_events     = cuda.to_device(events_type)                    # (C,T)
+    d_rsiC = cuda.to_device(rsi_closePT)                 # (P,T)
+    d_rsiL = cuda.to_device(rsi_lowPT)                   # (P,T)
+    d_rsiH = cuda.to_device(rsi_highPT)                  # (P,T)
+    d_reg  = cuda.to_device(regime_mask.astype(np.bool_))
+    d_bi   = cuda.to_device(buy_idx.astype(np.int32))
+    d_si   = cuda.to_device(sell_idx.astype(np.int32))
+    d_bt   = cuda.to_device(buy_thr.astype(np.float64))
+    d_st   = cuda.to_device(sell_thr.astype(np.float64))
+    d_evt  = cuda.to_device(events_type)
 
     threads = 128
     blocks = (C + threads - 1) // threads
 
     @cuda.jit
-    def _kernel(close_, close_prev_, rsiPT_, regime_, buy_idx_, sell_idx_, buy_thr_, sell_thr_, out_events_):
-        i = cuda.grid(1)  # combo id
-        C_ = out_events_.shape[0]
-        T_ = close_.shape[0]
+    def _kernel(rsiC, rsiL, rsiH, reg, bi, si, bt, st, out_evt):
+        i = cuda.grid(1)
+        C_ = out_evt.shape[0]
+        T_ = rsiC.shape[1]
         if i >= C_:
             return
 
-        p_buy  = buy_idx_[i]
-        p_sell = sell_idx_[i]
-        thr_b  = buy_thr_[i]
-        thr_s  = sell_thr_[i]
+        p_b  = bi[i]
+        p_s  = si[i]
+        thrb = bt[i]
+        thrs = st[i]
 
         in_pos = False
 
         for d in range(1, T_):
-            if not regime_[d]:
+            if not reg[d]:
                 continue
 
-            cb  = rsiPT_[p_buy, d]
-            cbp = rsiPT_[p_buy, d - 1]
-            cs  = rsiPT_[p_sell, d]
-            csp = rsiPT_[p_sell, d - 1]
-            cl  = close_[d]
-            clp = close_prev_[d]
-
-            # NaN-safe (NaN != NaN)
-            valid_buy  = (cb == cb) and (cbp == cbp) and (cl == cl) and (clp == clp)
-            valid_sell = (cs == cs) and (csp == csp)
+            # BUY side
+            cbp = rsiC[p_b, d - 1]
+            lb  = rsiL[p_b, d]
+            hb  = rsiH[p_b, d]
+            valid_buy = (cbp == cbp) and (lb == lb) and (hb == hb)  # NaN-safe
 
             if (not in_pos) and valid_buy:
-                if (cbp < thr_b) and (cb < thr_b) and (cl > clp):
-                    out_events_[i, d] = 1
+                # prev close < thr AND (bracket OR all-below)
+                if (cbp < thrb) and (((lb <= thrb) and (thrb <= hb)) or (hb < thrb)):
+                    out_evt[i, d] = 1
                     in_pos = True
                     continue
+
+            # SELL side
+            csp = rsiC[p_s, d - 1]
+            ls  = rsiL[p_s, d]
+            hs  = rsiH[p_s, d]
+            valid_sell = (csp == csp) and (ls == ls) and (hs == hs)
+
             if in_pos and valid_sell:
-                if (csp > thr_s) and (cs > thr_s):
-                    out_events_[i, d] = 2
+                # prev close > thr AND (bracket OR all-above)
+                if (csp > thrs) and (((ls <= thrs) and (thrs <= hs)) or (ls > thrs)):
+                    out_evt[i, d] = 2
                     in_pos = False
 
-    _kernel[blocks, threads](d_close, d_close_prev, d_rsiPT, d_regime,
-                             d_buy_idx, d_sell_idx, d_buy_thr, d_sell_thr, d_events)
-
-    # Catch device-side faults early
+    _kernel[blocks, threads](d_rsiC, d_rsiL, d_rsiH, d_reg, d_bi, d_si, d_bt, d_st, d_evt)
     cuda.synchronize()
+    return d_evt.copy_to_host()
 
-    return d_events.copy_to_host()
 
 
-def _cpu_fallback(close, close_prev, rsi_by_period, regime_mask, buy_idx, sell_idx, buy_thr, sell_thr) -> np.ndarray:
+def _cpu_fallback(rsi_close_by_period, rsi_low_by_period, rsi_high_by_period,
+                  regime_mask, buy_idx, sell_idx, buy_thr, sell_thr) -> np.ndarray:
     C = buy_idx.shape[0]
-    T = close.shape[0]
+    T = rsi_close_by_period.shape[1]
     events_type = np.zeros((C, T), dtype=np.int8)
     reg = regime_mask
 
@@ -122,29 +144,40 @@ def _cpu_fallback(close, close_prev, rsi_by_period, regime_mask, buy_idx, sell_i
         p_s = int(sell_idx[i])
         thr_b = float(buy_thr[i])
         thr_s = float(sell_thr[i])
-        r_b = rsi_by_period[p_b]
-        r_s = rsi_by_period[p_s]
+
+        r_close_b = rsi_close_by_period[p_b]
+        r_low_b   = rsi_low_by_period[p_b]
+        r_high_b  = rsi_high_by_period[p_b]
+
+        r_close_s = rsi_close_by_period[p_s]
+        r_low_s   = rsi_low_by_period[p_s]
+        r_high_s  = rsi_high_by_period[p_s]
 
         in_pos = False
         for d in range(1, T):
             if not reg[d]:
                 continue
-            cbp, cb = r_b[d - 1], r_b[d]
-            csp, cs = r_s[d - 1], r_s[d]
-            c, cp = close[d], close_prev[d]
 
-            valid_buy  = np.isfinite(cbp) and np.isfinite(cb) and np.isfinite(c) and np.isfinite(cp)
-            valid_sell = np.isfinite(csp) and np.isfinite(cs)
+            # BUY: prev close < thr & today's band brackets OR below thr
+            cb_prev = r_close_b[d - 1]
+            lb, hb  = r_low_b[d], r_high_b[d]
+            if np.isfinite(cb_prev) and np.isfinite(lb) and np.isfinite(hb):
+                if (not in_pos) and (cb_prev < thr_b) and _band_ok_buy_vals(lb, hb, thr_b):
+                    events_type[i, d] = BUY
+                    in_pos = True
+                    continue
 
-            if (not in_pos) and valid_buy and (cbp < thr_b) and (cb < thr_b) and (c > cp):
-                events_type[i, d] = BUY
-                in_pos = True
-                continue
-            if in_pos and valid_sell and (csp > thr_s) and (cs > thr_s):
-                events_type[i, d] = SELL
-                in_pos = False
+            # SELL: prev close > thr & today's band brackets OR above thr
+            cs_prev = r_close_s[d - 1]
+            ls, hs  = r_low_s[d], r_high_s[d]
+            if in_pos and np.isfinite(cs_prev) and np.isfinite(ls) and np.isfinite(hs):
+                if (cs_prev > thr_s) and _band_ok_sell_vals(ls, hs, thr_s):
+                    events_type[i, d] = SELL
+                    in_pos = False
 
     return events_type
+
+
 
 
 def build_event_streams(
@@ -156,15 +189,20 @@ def build_event_streams(
     batch_size: int | None = None,
 ) -> Dict[str, object]:
     """
-    Build events_type[C,T] (0/1/2) for a list of combos.
+    Build events_type[C,T] (0/1/2) for a list of combos using the band rule.
     """
     T = len(df)
-    close = df["Close"].to_numpy(np.float64, copy=False)
-    close_prev = np.empty_like(close)
-    close_prev[0] = np.nan
-    close_prev[1:] = close[:-1]
+    close_map = rsi_maps["close_map"]
+    low_map   = rsi_maps["low_map"]
+    high_map  = rsi_maps["high_map"]
 
-    rsiPT, periods, p2row = _prepare_rsi_by_period(df, rsi_maps["close_map"])
+    # Prepare arrays with aligned period rows
+    rsiC, periods = _prepare_by_period(df, close_map)     # (P,T)
+    rsiL = _prepare_by_period_aligned(df, periods, low_map)
+    rsiH = _prepare_by_period_aligned(df, periods, high_map)
+
+    # Map period -> row index using CLOSE periods
+    p2row = {p: i for i, p in enumerate(periods)}
 
     C = len(combos)
     buy_idx = np.empty(C, dtype=np.int32)
@@ -172,8 +210,9 @@ def build_event_streams(
     buy_thr = np.empty(C, dtype=np.float64)
     sell_thr = np.empty(C, dtype=np.float64)
     for i, (bp, sp, bthr, sthr) in enumerate(combos):
-        if bp not in p2row or sp not in p2row:
+        if (bp not in p2row) or (sp not in p2row):
             raise ValueError(f"RSI period missing in maps: buy={bp} or sell={sp}")
+        # Also ensure L/H exist for those periods (prepare_by_period_aligned would have raised already)
         buy_idx[i] = p2row[bp]
         sell_idx[i] = p2row[sp]
         buy_thr[i] = bthr
@@ -184,7 +223,7 @@ def build_event_streams(
     if len(regime_mask_host) != T:
         raise ValueError("regime_mask_host length mismatch")
 
-    # Decide backend
+    # Backend choice (Numba often disabled for cc>=12, so CPU path is common)
     use_numba = False
     reason = ""
     if backend.lower() == "numba":
@@ -199,16 +238,15 @@ def build_event_streams(
 
     if use_numba:
         try:
-            events_type = _launch_numba_kernel(close, close_prev, rsiPT, regime_mask_host,
+            events_type = _launch_numba_kernel(rsiC, rsiL, rsiH, regime_mask_host,
                                                buy_idx, sell_idx, buy_thr, sell_thr)
             return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"numba({reason})"}}
         except Exception as e:
-            # Hard fallback to CPU
-            events_type = _cpu_fallback(close, close_prev, rsiPT, regime_mask_host,
+            events_type = _cpu_fallback(rsiC, rsiL, rsiH, regime_mask_host,
                                         buy_idx, sell_idx, buy_thr, sell_thr)
             return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"cpu(fallback:{e})"}}
 
     # CPU path
-    events_type = _cpu_fallback(close, close_prev, rsiPT, regime_mask_host,
+    events_type = _cpu_fallback(rsiC, rsiL, rsiH, regime_mask_host,
                                 buy_idx, sell_idx, buy_thr, sell_thr)
     return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"cpu({reason})"}}

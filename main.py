@@ -191,6 +191,8 @@ def main() -> int:
     logger8 = get_logger("phase08", log8_path)
 
     try:
+        # --- Phase 8: GPU buy/sell predicate masks ---
+
         # Resolve single test combo from config
         rsi_periods = list(sorted(cfg.get("RSI_PERIODS", [2])))
         buy_period  = int(rsi_periods[0])
@@ -205,17 +207,25 @@ def main() -> int:
         backend = select_backend("cupy")  # dict with 'xp'
         cp = backend["xp"]
 
-        close_map = RSI_MAPS["close_map"]  # from Phase 7
+        # Phase 7 outputs mapped into RSI_MAPS
+        close_map = RSI_MAPS["close_map"]
+        low_map   = RSI_MAPS["low_map"]
+        high_map  = RSI_MAPS["high_map"]
+
+        # NEW: pass low_map and high_map to the Phase-8 API
         buy_ok_dev, sell_ok_dev, meta = make_buy_sell_masks(
             df=df,
             close_map=close_map,
+            low_map=low_map,          # <-- added
+            high_map=high_map,        # <-- added
             buy_period=buy_period,
             sell_period=sell_period,
             buy_thr=buy_thr,
             sell_thr=sell_thr,
             regime_mask_host=REGIME_MASK_HOST,
-            cp=backend,  # pass backend dict or cp; both supported
+            cp=backend,               # backend dict or cp module; both work
         )
+
 
         banner8 = phase8.build_banner(meta)
         print()
@@ -528,7 +538,11 @@ def main() -> int:
 
         # Iterate over every regime label and produce one trades CSV per label (for the first combo)
         for label in labels:
-            regime_mask_host = regimes.regime_mask(df, label)
+            # in Phase 11 loop, before build_event_streams(...)
+            if label in ("gap_(None,None)", "gap_all", None):
+                regime_mask_host = np.ones(len(df), dtype=bool)
+            else:
+                regime_mask_host = regimes.regime_mask(df, label)
 
             streams = build_event_streams(
                 df=df,
@@ -580,6 +594,41 @@ def main() -> int:
         logger11.error(msg)
         sys.exit(1)
     # ---- End Phase 11 ----
+
+
+
+
+
+
+
+    # --- Phase 11 DEBUG DUMPS (per regime) ---
+    from src.debug_phase11 import emit_phase11_debug_csv
+
+    # Re-use the same labels loop you already have in Phase 11:
+    for label in labels:
+        regime_mask_host = regimes.regime_mask(df, label)
+
+        # keep the same representative combo you price in Phase 11 (e.g., combos[0])
+        dbg_path = emit_phase11_debug_csv(
+            df=df,
+            rsi_maps=RSI_MAPS,
+            combo=combos[0],
+            regime_label=label,
+            regime_mask_host=regime_mask_host,
+            tolerance_pct=float(cfg.get("RSI_TOLERANCE_PCT", 0.001)),
+            out_dir="logs",
+        )
+        print(f"[DEBUG] wrote {dbg_path}")
+        logger11.info(f"[DEBUG] wrote {dbg_path}")
+    # --- END Phase 11 DEBUG DUMPS ---
+
+
+
+
+
+
+
+
 
 
 

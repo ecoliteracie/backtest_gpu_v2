@@ -103,15 +103,12 @@ def label_by_ranges(
     return df["REGIME"]
 
 
-def regime_mask(df: pd.DataFrame, regime_label: str) -> np.ndarray:
-    """
-    Return a host boolean mask aligned to df.index:
-      - "gap_all" -> all True
-      - otherwise df["REGIME"] == regime_label
-    """
-    n = len(df.index)
-    if regime_label == "gap_all":
+def regime_mask(df, regime_label: str):
+    n = len(df)
+    # Treat these as "no regime gating"
+    if regime_label is None or regime_label in ("gap_all", "gap_(None,None)", "none-none", "(None,None)"):
         return np.ones(n, dtype=bool)
     if "REGIME" not in df.columns:
-        raise ValueError("REGIME not present. Call label_by_ranges(df, ...) first.")
-    return (df["REGIME"] == regime_label).to_numpy(dtype=bool, copy=False)
+        raise ValueError("REGIME not found; run label_by_ranges first")
+    return (df["REGIME"] == regime_label).to_numpy(dtype=bool)
+

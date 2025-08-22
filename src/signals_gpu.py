@@ -51,6 +51,8 @@ def _shift_dev(cp, arr: "cp.ndarray", fill_value=np.nan) -> "cp.ndarray":
 def make_buy_sell_masks(
     df: pd.DataFrame,
     close_map: Dict[int, str],
+    low_map: Dict[int, str],
+    high_map: Dict[int, str],
     buy_period: int,
     sell_period: int,
     buy_thr: float,
@@ -59,26 +61,30 @@ def make_buy_sell_masks(
     cp=None,  # may be a CuPy module OR a backend dict from select_backend
 ) -> Tuple["cp.ndarray", "cp.ndarray", Dict]:
     """
-    Build GPU buy/sell predicate masks using CLOSE-based RSI and two-day rules.
-
-    Returns:
-      buy_ok_dev (cp.ndarray bool), sell_ok_dev (cp.ndarray bool), meta (dict)
+    Build GPU buy/sell predicate masks using:
+      BUY : RSI_CLOSE[d-1] < buy_thr AND (band brackets buy_thr OR band entirely below buy_thr)
+      SELL: RSI_CLOSE[d-1] > sell_thr AND (band brackets sell_thr OR band entirely above sell_thr)
+    No momentum; day 0 is always False.
     """
     cp, backend_meta = _resolve_backend_cp(cp)
 
     # Sanity on periods
-    if buy_period not in close_map:
-        raise ValueError(f"buy_period {buy_period} not present in close_map.")
-    if sell_period not in close_map:
-        raise ValueError(f"sell_period {sell_period} not present in close_map.")
+    for p, m, name in [
+        (buy_period, close_map, "close_map(buy)"),
+        (sell_period, close_map, "close_map(sell)"),
+        (buy_period, low_map,   "low_map(buy)"),
+        (buy_period, high_map,  "high_map(buy)"),
+        (sell_period, low_map,  "low_map(sell)"),
+        (sell_period, high_map, "high_map(sell)"),
+    ]:
+        if p not in m:
+            raise ValueError(f"RSI period {p} not present in {name}.")
 
     # If thresholds inverted, return empty masks with reason
     if buy_thr >= sell_thr:
         n = len(df)
         empty = cp.zeros(n, dtype=cp.bool_)
-        # regime size
         regime_true = int(regime_mask_host.sum()) if isinstance(regime_mask_host, np.ndarray) else n
-        # backend info
         backend_info = (
             {"name": backend_meta.get("device_name"), "cc": backend_meta.get("cc")}
             if isinstance(backend_meta, dict)
@@ -94,26 +100,30 @@ def make_buy_sell_masks(
         }
         return empty, empty, meta
 
-    # Resolve series
-    rsi_buy_col = close_map[buy_period]
-    rsi_sell_col = close_map[sell_period]
+    # Column names
+    rsi_close_buy_col = close_map[buy_period]
+    rsi_low_buy_col   = low_map[buy_period]
+    rsi_high_buy_col  = high_map[buy_period]
+
+    rsi_close_sell_col = close_map[sell_period]
+    rsi_low_sell_col   = low_map[sell_period]
+    rsi_high_sell_col  = high_map[sell_period]
 
     # Host->device transfers (float64)
-    close_h = df["Close"].to_numpy(np.float64, copy=False)
-    rsi_buy_h = df[rsi_buy_col].to_numpy(np.float64, copy=False)
-    rsi_sell_h = df[rsi_sell_col].to_numpy(np.float64, copy=False)
+    rsi_c_buy  = cp.asarray(df[rsi_close_buy_col].to_numpy(np.float64, copy=False))
+    rsi_c_sell = cp.asarray(df[rsi_close_sell_col].to_numpy(np.float64, copy=False))
 
-    close = cp.asarray(close_h)
-    rsi_buy = cp.asarray(rsi_buy_h)
-    rsi_sell = cp.asarray(rsi_sell_h)
+    rsi_l_buy  = cp.asarray(df[rsi_low_buy_col].to_numpy(np.float64, copy=False))
+    rsi_h_buy  = cp.asarray(df[rsi_high_buy_col].to_numpy(np.float64, copy=False))
+    rsi_l_sell = cp.asarray(df[rsi_low_sell_col].to_numpy(np.float64, copy=False))
+    rsi_h_sell = cp.asarray(df[rsi_high_sell_col].to_numpy(np.float64, copy=False))
 
-    # Previous day arrays (device)
-    close_prev = _shift_dev(cp, close, fill_value=cp.nan)
-    rsi_buy_prev = _shift_dev(cp, rsi_buy, fill_value=cp.nan)
-    rsi_sell_prev = _shift_dev(cp, rsi_sell, fill_value=cp.nan)
+    # Previous-day arrays (device)
+    rsi_c_buy_prev  = _shift_dev(cp, rsi_c_buy,  fill_value=cp.nan)
+    rsi_c_sell_prev = _shift_dev(cp, rsi_c_sell, fill_value=cp.nan)
 
     # Regime mask on device
-    n = close.shape[0]
+    n = rsi_c_buy.shape[0]
     if regime_mask_host is None:
         regime_mask_dev = cp.ones(n, dtype=cp.bool_)
         regime_true_count = int(n)
@@ -123,19 +133,25 @@ def make_buy_sell_masks(
             raise ValueError(f"regime_mask_host length {len(regime_mask_host)} does not match df length {n}.")
         regime_mask_dev = cp.asarray(regime_mask_host.astype(bool, copy=False))
         regime_true_count = int(np.count_nonzero(regime_mask_host))
-        regime_label = None  # caller can overwrite later
+        regime_label = None
 
     # NaN validity masks
     isfinite = cp.isfinite
-    valid_buy = isfinite(rsi_buy_prev) & isfinite(rsi_buy) & isfinite(close_prev) & isfinite(close)
-    valid_sell = isfinite(rsi_sell_prev) & isfinite(rsi_sell)
+    valid_buy  = isfinite(rsi_c_buy_prev)  & isfinite(rsi_l_buy)  & isfinite(rsi_h_buy)
+    valid_sell = isfinite(rsi_c_sell_prev) & isfinite(rsi_l_sell) & isfinite(rsi_h_sell)
 
-    # Two-day predicates (device, vectorized)
-    buy_ok = (rsi_buy_prev < buy_thr) & (rsi_buy < buy_thr) & (close > close_prev)
-    sell_ok = (rsi_sell_prev > sell_thr) & (rsi_sell > sell_thr)
+    # Band checks (device)
+    # BUY: bracket OR entirely below threshold
+    buy_band = ((rsi_l_buy <= buy_thr) & (buy_thr <= rsi_h_buy)) | (rsi_h_buy < buy_thr)
+    # SELL: bracket OR entirely above threshold
+    sell_band = ((rsi_l_sell <= sell_thr) & (sell_thr <= rsi_h_sell)) | (rsi_l_sell > sell_thr)
 
-    # Apply validity and regime
-    buy_ok &= valid_buy & regime_mask_dev
+    # Predicates
+    buy_ok  = (rsi_c_buy_prev  < buy_thr) & buy_band
+    sell_ok = (rsi_c_sell_prev > sell_thr) & sell_band
+
+    # Apply validity + regime
+    buy_ok  &= valid_buy  & regime_mask_dev
     sell_ok &= valid_sell & regime_mask_dev
 
     # Day-0 must be False
@@ -144,7 +160,7 @@ def make_buy_sell_masks(
         sell_ok[0] = False
 
     # Counts and sample indices (host)
-    buy_count = int(cp.count_nonzero(buy_ok).item())
+    buy_count  = int(cp.count_nonzero(buy_ok).item())
     sell_count = int(cp.count_nonzero(sell_ok).item())
 
     def first_dates(mask_dev, k=5) -> List[str]:
@@ -154,10 +170,9 @@ def make_buy_sell_masks(
         idx_host = cp.asnumpy(idx_dev[:k]).tolist()
         return [str(df.index[i]) for i in idx_host]
 
-    samples_buy = first_dates(buy_ok, k=5)
+    samples_buy  = first_dates(buy_ok,  k=5)
     samples_sell = first_dates(sell_ok, k=5)
 
-    # Backend info for banner
     backend_info = (
         {"name": backend_meta.get("device_name"), "cc": backend_meta.get("cc")}
         if isinstance(backend_meta, dict)
