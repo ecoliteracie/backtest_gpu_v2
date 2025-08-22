@@ -23,8 +23,8 @@ SETTINGS = {
         "SELL_RSI_THRESHOLD": 72,  # intra 92 vs close 89 vs open 87
         "EXPENSE_RATIO": 0.0075,  # 0.75%
         "DISTRIBUTION_YIELD": 0.0217,  # 2.17%
-        #"GAP_RANGES":[(None, -19), (-19, 7), (7, 19), (19, 31), (31, None)] 
-        "GAP_RANGES":[(None, None)] 
+        "GAP_RANGES":[(None, -19), (-19, 7), (7, 19), (19, 31), (31, None)] 
+        #"GAP_RANGES":[(None, None)] 
     },
     "TQQQ": {
         "ACTIVE": True ,
