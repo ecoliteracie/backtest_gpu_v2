@@ -329,3 +329,221 @@ def simulate_grid_summary(
         w.writerows(rows)
 
     return out_path
+
+
+
+
+
+
+
+
+
+# === Phase 11: Transaction Footprint (single pattern) =========================
+from typing import Optional
+from datetime import datetime
+
+def _norm_regime_for_filename_exact(label: Optional[str]) -> str:
+    # Keep user-visible format (e.g., gap_(7,19)), or use gap_all
+    if label in (None, "gap_all", "gap_(None,None)"):
+        return "gap_all"
+    return str(label)
+
+def emit_trades_csv(
+    df: pd.DataFrame,
+    rsi_maps: Dict[str, Dict[int, str]],
+    regime_label: Optional[str],
+    buy_p: int,
+    sell_p: int,
+    buy_thr: float,
+    sell_thr: float,
+    cfg: Dict[str, Any],
+    out_dir: str = "logs",
+) -> Dict[str, Any]:
+    """
+    Generate one CSV with executed transactions only, for exactly one pattern.
+    CSV schema (exact order):
+      Date, Regime, Action, Price, Shares, Buy RSI Period, Buy RSI Threshold,
+      Sell RSI Period, Sell RSI Threshold, Cash Balance, Portfolio Balance
+    Shares use integer sizing via floor(cash/price). Float64 everywhere.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Guard for single-pattern semantics (caller controls inputs; we defend here too)
+    if not (isinstance(buy_p, int) and isinstance(sell_p, int)):
+        raise ValueError("Transaction footprint supports exactly one pattern (single buy/sell periods).")
+    if not (np.isscalar(buy_thr) and np.isscalar(sell_thr)):
+        raise ValueError("Transaction footprint supports exactly one pattern (single buy/sell thresholds).")
+
+    # Build a regime mask for the chosen label
+    try:
+        from src import regimes as _reg
+        if regime_label in (None, "gap_all", "gap_(None,None)"):
+            regime_mask_host = np.ones(len(df), dtype=bool)
+        else:
+            regime_mask_host = _reg.regime_mask(df, regime_label)
+    except Exception:
+        # Fallback: no regime cut
+        regime_mask_host = np.ones(len(df), dtype=bool)
+
+    # Build event stream for this single combo using Phase-11 kernel
+    from src.gpu_events import build_event_streams, BUY, SELL
+    combo = (int(buy_p), int(sell_p), float(buy_thr), float(sell_thr))
+    streams = build_event_streams(
+        df=df,
+        rsi_maps=rsi_maps,
+        regime_mask_host=regime_mask_host,
+        combos=[combo],
+        backend="auto",
+    )
+    events_type = streams["events_type"][0]     # shape (T,)
+    T = len(events_type)
+
+    # Portfolio config
+    initial_cash = float(cfg.get("INITIAL_CASH", 1000.0))
+    daily_cash   = float(cfg.get("DAILY_CASH", 0.0))
+    tol_pct      = float(cfg.get("RSI_TOLERANCE_PCT", 0.001))
+
+    # File name
+    symbol = _infer_symbol_from_cfg(cfg) if "CSV_CACHE_FILE" in cfg else "SYMBOL"
+    reg_name = _norm_regime_for_filename_exact(regime_label)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(
+        out_dir,
+        f"trades_{symbol}_{reg_name}_bp{buy_p}_sp{sell_p}_bt{int(buy_thr)}_st{int(sell_thr)}_{ts}.csv"
+    )
+
+    # State
+    cash = initial_cash
+    shares = 0.0
+    close_last = float(df["Close"].iloc[-1])
+
+    buys = sells = 0
+    fast_buy = fast_sell = 0
+    bsolve_buy = bsolve_sell = 0
+    no_solution = 0
+
+    # Writer
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "Date","Regime","Action","Price","Shares",
+            "Buy RSI Period","Buy RSI Threshold","Sell RSI Period","Sell RSI Threshold",
+            "Cash Balance","Portfolio Balance"
+        ])
+
+        for d in range(T):
+            # Inject daily cash at start of day
+            cash += daily_cash
+
+            evt = int(events_type[d])
+            if evt not in (BUY, SELL):
+                continue
+            if not regime_mask_host[d]:
+                # Should not happen (kernel already masked), but keep strict
+                continue
+
+            side = evt
+            period = buy_p if side == BUY else sell_p
+            thr    = buy_thr if side == BUY else sell_thr
+
+            # Price resolution (FAST paths or BSOLVE) using the same helper as summary
+            price, mode, _extras = _price_for_event(
+                df=df, rsi_maps=rsi_maps, day_idx=d, side=side, period=period, thr=thr, tolerance_pct=tol_pct
+            )
+            if price is None or not np.isfinite(price) or price <= 0.0:
+                no_solution += 1
+                # Skip this action (log to phase log in caller if desired)
+                continue
+
+            # Execute with integer shares: all-in on BUY, all-out on SELL
+            if side == BUY:
+                qty = math.floor(cash / price)
+                if qty <= 0:
+                    # Insufficient cash to buy a single share
+                    no_solution += 1
+                    continue
+                cost = qty * price
+                cash -= cost
+                shares += float(qty)
+                buys += 1
+                if mode == "FAST_HIGH":
+                    fast_buy += 1
+                elif mode == "BSOLVE":
+                    bsolve_buy += 1
+            else:  # SELL
+                qty = shares
+                if qty <= 0:
+                    # No position to liquidate
+                    no_solution += 1
+                    continue
+                proceeds = qty * price
+                cash += proceeds
+                shares = 0.0
+                sells += 1
+                if mode == "FAST_LOW":
+                    fast_sell += 1
+                elif mode == "BSOLVE":
+                    bsolve_sell += 1
+
+            # After action, mark the portfolio on Close[d]
+            mark = float(df["Close"].iloc[d])
+            portfolio = cash + shares * mark
+
+            # Emit one row
+            w.writerow([
+                str(df.index[d]),
+                str(df["REGIME"].iloc[d]) if "REGIME" in df.columns else (regime_label or "gap_all"),
+                ("BUY" if side == BUY else "SELL"),
+                f"{price:.6f}",
+                f"{qty:.6f}",
+                buy_p, float(buy_thr), sell_p, float(sell_thr),
+                f"{cash:.6f}",
+                f"{portfolio:.6f}",
+            ])
+
+    # Final accounting for banner + reconciliation
+    final_value = float(cash + shares * close_last)
+    invested = float(initial_cash + daily_cash * T)
+    roi_pct, cagr_pct = _compute_roi_cagr(final_value, invested, df.index[0], df.index[-1])
+
+    # Reconcile with file tail
+    try:
+        tail = None
+        with open(path, "r", newline="") as f:
+            rdr = csv.reader(f)
+            next(rdr, None)  # header
+            for row in rdr:
+                tail = row
+        if tail is not None:
+            last_cash = float(tail[-2])
+            last_port = float(tail[-1])
+            reconcile_ok = (
+                abs(last_port - final_value) < 1e-6 and
+                abs(last_cash - cash) < 1e-6
+            )
+        else:
+            # No trades: portfolio = invested if always cash; mark on last close
+            reconcile_ok = True
+    except Exception:
+        reconcile_ok = False
+
+    return {
+        "path": path,
+        "counts": {
+            "buys": buys, "sells": sells,
+            "fast_buy": fast_buy, "fast_sell": fast_sell,
+            "bsolve_buy": bsolve_buy, "bsolve_sell": bsolve_sell,
+            "no_solution": no_solution,
+        },
+        "final": {
+            "portfolio": final_value,
+            "roi_pct": roi_pct,
+            "cagr_pct": cagr_pct,
+            "invested": invested,
+            "reconcile_ok": bool(reconcile_ok),
+        },
+        "pattern": {
+            "buy_p": buy_p, "sell_p": sell_p, "buy_thr": float(buy_thr), "sell_thr": float(sell_thr),
+            "regime": regime_label or "gap_all",
+        },
+    }

@@ -506,6 +506,85 @@ def main() -> int:
     # ---- End Phase 10 ----
 
 
+
+
+
+
+    # ---- Phase 11: Transaction Footprint (single pattern) HARD-CODED ----
+    # Toggle this to True to emit the single-pattern transaction CSV and exit.
+    HARD_EMIT_TRADES = False
+
+    # Hard-coded pattern & regime
+    REGIME_LABEL = "gap_all"      # or "gap_(7,19)" or "gap_(None,None)"
+    BUY_PERIOD   = 2
+    SELL_PERIOD  = 2
+    BUY_THR      = 24.0
+    SELL_THR     = 90.0
+
+    from pathlib import Path as _Path
+    log_trades_path = _Path("logs") / "phase11_trades.log"
+    logger_trades = get_logger("phase11_trades", log_trades_path)
+
+    if HARD_EMIT_TRADES:
+        from src.sim_core import emit_trades_csv
+
+        try:
+            res = emit_trades_csv(
+                df=df,               # df_trim with REGIME/MA_GAP available
+                rsi_maps=RSI_MAPS,   # from Phase 7
+                regime_label=REGIME_LABEL,
+                buy_p=BUY_PERIOD, sell_p=SELL_PERIOD,
+                buy_thr=BUY_THR, sell_thr=SELL_THR,
+                cfg=cfg,
+                out_dir="logs",
+            )
+
+            # Console banner
+            print("\n# Phase 11 — Transaction Footprint (single pattern)\n")
+            print(f"[PATTERN] buy_p={res['pattern']['buy_p']}, sell_p={res['pattern']['sell_p']}, "
+                f"buy_thr={res['pattern']['buy_thr']}, sell_thr={res['pattern']['sell_thr']}, "
+                f"regime={res['pattern']['regime']}")
+            print(f"[COUNTS ] buys={res['counts']['buys']}, sells={res['counts']['sells']}, "
+                f"fast_buy={res['counts']['fast_buy']}, fast_sell={res['counts']['fast_sell']}, "
+                f"bsolve_buy={res['counts']['bsolve_buy']}, bsolve_sell={res['counts']['bsolve_sell']}, "
+                f"no_solution={res['counts']['no_solution']}")
+            print(f"[RESULT ] final_portfolio={res['final']['portfolio']:.6f}, ROI%={res['final']['roi_pct']:.4f}, "
+                f"CAGR%={res['final']['cagr_pct']:.4f}, invested={res['final']['invested']:.6f}")
+            print(f"[FILE   ] {res['path']}")
+            if not res["final"]["reconcile_ok"]:
+                print("ERROR: reconciliation failed (cash/portfolio mismatch at CSV tail)")
+
+            # Mirror to log
+            logger_trades.info("# Phase 11 — Transaction Footprint (single pattern)")
+            logger_trades.info(f"[PATTERN] buy_p={res['pattern']['buy_p']}, sell_p={res['pattern']['sell_p']}, "
+                            f"buy_thr={res['pattern']['buy_thr']}, sell_thr={res['pattern']['sell_thr']}, "
+                            f"regime={res['pattern']['regime']}")
+            logger_trades.info(f"[COUNTS ] buys={res['counts']['buys']}, sells={res['counts']['sells']}, "
+                            f"fast_buy={res['counts']['fast_buy']}, fast_sell={res['counts']['fast_sell']}, "
+                            f"bsolve_buy={res['counts']['bsolve_buy']}, bsolve_sell={res['counts']['bsolve_sell']}, "
+                            f"no_solution={res['counts']['no_solution']}")
+            logger_trades.info(f"[RESULT ] final_portfolio={res['final']['portfolio']:.6f}, ROI%={res['final']['roi_pct']:.4f}, "
+                            f"CAGR%={res['final']['cagr_pct']:.4f}, invested={res['final']['invested']:.6f}")
+            logger_trades.info(f"[FILE   ] {res['path']}")
+            if not res["final"]["reconcile_ok"]:
+                logger_trades.error("reconciliation failed (cash/portfolio mismatch at CSV tail)")
+
+            # Exit so the normal Phase-11 grid doesn’t run afterward
+            #sys.exit(0)
+
+        except Exception as e:
+            msg = f"Phase 11 footprint failed: {e}"
+            print(msg)
+            logger_trades.error(msg)
+            sys.exit(1)
+    # ---- End hard-coded footprint block ----
+
+
+
+
+
+
+
     # ---- Phase 11: GPU Event Pairing + CPU Pricing ----
     log11_path = Path("logs") / "phase11_events.log"
     logger11 = get_logger("phase11", log11_path)

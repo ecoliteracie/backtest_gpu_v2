@@ -119,18 +119,43 @@ def main():
         else:
             print(f"Creating and pushing tag {tag}...")
             try:
-                # Create the tag
+                # Create the tag with more detailed output
+                print(f"  - Creating annotated tag: {tag}")
+                try:
+                    # First try to delete the tag if it exists locally
+                    run(["git", "tag", "-d", tag], dry=args.dry_run)
+                    print(f"  - Removed existing local tag {tag}")
+                except subprocess.CalledProcessError:
+                    pass  # Tag didn't exist locally, which is fine
+                
+                # Create the new tag
                 run(["git", "tag", "-a", tag, "-m", f"The end of Phase {phase}"], dry=args.dry_run)
                 print(f"  - Created local tag {tag}")
+                
+                # Verify the tag was created locally
+                if not args.dry_run:
+                    try:
+                        run(["git", "show", tag], dry=args.dry_run)
+                        print(f"  - Verified tag {tag} exists locally")
+                    except subprocess.CalledProcessError as e:
+                        print(f"  - ERROR: Failed to verify local tag: {e}")
+                        raise
                 
                 # Push the tag with retries and force push if needed
                 max_retries = 3
                 for attempt in range(1, max_retries + 1):
                     try:
-                        print(f"  - Pushing tag to remote (attempt {attempt}/{max_retries})...")
-                        # First try with force to ensure the tag is updated if it exists
-                        run(["git", "push", "origin", f"refs/tags/{tag}", "--force"], dry=args.dry_run)
-                        print(f"  - Successfully pushed tag {tag} to remote")
+                        print(f"\n  --- Attempt {attempt}/{max_retries} ---")
+                        print(f"  - Pushing tag to remote: {tag}")
+                        
+                        # First, check remote connection
+                        print("  - Checking remote connection...")
+                        run(["git", "remote", "-v"], dry=args.dry_run)
+                        
+                        # Push with explicit refspec and force
+                        print("  - Pushing with force...")
+                        run(["git", "push", "origin", f"refs/tags/{tag}:refs/tags/{tag}", "--force"], dry=args.dry_run)
+                        print(f"  ✓ Successfully pushed tag {tag} to remote")
                         break
                     except subprocess.CalledProcessError as e:
                         if attempt == max_retries:
