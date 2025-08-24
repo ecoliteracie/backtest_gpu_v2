@@ -18,8 +18,7 @@ from src.banners import phase1, phase2, phase3, phase4, phase5, phase6k, phase7,
 from src.columns import detect_rsi_columns, analyze_rsi_invariants
 from src.signals_gpu import make_buy_sell_masks
 from src.gpu_events import build_event_streams
-from src.sim_core import simulate_once_from_events
-
+from src.sim_core import simulate_once_from_events, simulate_grid_summary
 
 
 def _ensure_dirs() -> None:
@@ -566,6 +565,18 @@ def main() -> int:
                 out_dir="logs",
             )
 
+            summary_csv = simulate_grid_summary(
+                df=df,
+                rsi_maps=RSI_MAPS,
+                events_type=events_type,   # all combos for this regime
+                combos=combos,
+                cfg=cfg,
+                regime_label=label,
+                out_dir="results",
+            )
+            print(f"[RESULTS] wrote {summary_csv}")
+            logger11.info(f"[RESULTS] wrote {summary_csv}")
+
             # Aggregate pair counts across combos for this label (sanity)
             paired_all = 0
             for i in range(C):
@@ -600,7 +611,7 @@ def main() -> int:
 
 
 
-
+    '''
     # --- Phase 11 DEBUG DUMPS (per regime) ---
     from src.debug_phase11 import emit_phase11_debug_csv
 
@@ -621,7 +632,7 @@ def main() -> int:
         print(f"[DEBUG] wrote {dbg_path}")
         logger11.info(f"[DEBUG] wrote {dbg_path}")
     # --- END Phase 11 DEBUG DUMPS ---
-
+    '''
 
 
 

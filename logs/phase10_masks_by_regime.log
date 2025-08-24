@@ -1,32 +1,20 @@
-[2025-08-22 12:11:41] INFO phase10 - ====================================================
-[2025-08-22 12:11:41] INFO phase10 - Phase 10 — Masks by Regime (GPU)
-[2025-08-22 12:11:41] INFO phase10 - ====================================================
-[2025-08-22 12:11:41] INFO phase10 - [PARAMS] buy_period=2, sell_period=2, buy_thr=24.0, sell_thr=90.0
-[2025-08-22 12:11:41] INFO phase10 - [TOTALS] buy_ok=740, sell_ok=541
-[2025-08-22 12:11:41] INFO phase10 - [BACKEND] CuPy device=NVIDIA GeForce RTX 5060, cc=12.0
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(None,-19.0)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=138, sell_ok=92
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2011-08-19 00:00:00, 2011-08-22 00:00:00, 2011-09-02 00:00:00, 2011-09-06 00:00:00, 2011-09-21 00:00:00 | sell idx: 2011-09-14 00:00:00, 2011-09-15 00:00:00, 2011-09-16 00:00:00, 2011-10-11 00:00:00, 2011-10-13 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(-19.0,7.0)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=174, sell_ok=84
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2011-06-21 00:00:00, 2011-07-12 00:00:00, 2011-07-13 00:00:00, 2011-07-14 00:00:00, 2011-07-15 00:00:00 | sell idx: 2011-07-01 00:00:00, 2011-07-05 00:00:00, 2012-02-03 00:00:00, 2012-02-17 00:00:00, 2012-02-29 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(7.0,19.0)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=194, sell_ok=143
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2011-05-17 00:00:00, 2011-05-24 00:00:00, 2011-05-25 00:00:00, 2011-06-06 00:00:00, 2011-06-09 00:00:00 | sell idx: 2012-03-19 00:00:00, 2013-02-14 00:00:00, 2013-02-15 00:00:00, 2013-03-08 00:00:00, 2013-03-11 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(19.0,31.0)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=173, sell_ok=164
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2011-05-03 00:00:00, 2011-05-04 00:00:00, 2011-05-05 00:00:00, 2013-06-06 00:00:00, 2013-06-07 00:00:00 | sell idx: 2013-05-31 00:00:00, 2013-06-19 00:00:00, 2013-07-08 00:00:00, 2013-07-12 00:00:00, 2013-07-15 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(31.0,None)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=28, sell_ok=20
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2020-12-10 00:00:00, 2020-12-11 00:00:00, 2020-12-22 00:00:00, 2020-12-23 00:00:00, 2021-01-27 00:00:00 | sell idx: 2020-12-02 00:00:00, 2020-12-03 00:00:00, 2020-12-04 00:00:00, 2020-12-07 00:00:00, 2020-12-08 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [REGIME] gap_(NaN)
-[2025-08-22 12:11:41] INFO phase10 - [COUNTS] buy_ok=33, sell_ok=38
-[2025-08-22 12:11:41] INFO phase10 - [SAMPLES] buy idx: 2010-07-29 00:00:00, 2010-07-30 00:00:00, 2010-08-11 00:00:00, 2010-08-12 00:00:00, 2010-08-13 00:00:00 | sell idx: 2010-07-21 00:00:00, 2010-07-27 00:00:00, 2010-09-21 00:00:00, 2010-09-27 00:00:00, 2010-09-30 00:00:00
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] totals_all_rows      : buy=740, sell=541
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] totals_in_ma_gap_dom : buy=707, sell=503
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] sum_per_regime==dom? : buy=True (sum=707 vs dom=707), sell=True (sum=503 vs dom=503)
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] in_NaN_domain        : buy=33, sell=38
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] overlaps             : 0, first_date=None
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] holes                : 0, first_date=None
-[2025-08-22 12:11:41] INFO phase10 - [CHECK] boundary assignments : -19.0:  | 7.0:  | 19.0:  | 31.0: 
-[2025-08-22 12:11:41] INFO phase10 - [LOG]    wrote logs/phase10_masks_by_regime.log
+[2025-08-23 19:50:42] INFO phase10 - ====================================================
+[2025-08-23 19:50:42] INFO phase10 - Phase 10 — Masks by Regime (GPU)
+[2025-08-23 19:50:42] INFO phase10 - ====================================================
+[2025-08-23 19:50:42] INFO phase10 - [PARAMS] buy_period=2, sell_period=2, buy_thr=24.0, sell_thr=90.0
+[2025-08-23 19:50:42] INFO phase10 - [TOTALS] buy_ok=740, sell_ok=541
+[2025-08-23 19:50:42] INFO phase10 - [BACKEND] CuPy device=NVIDIA GeForce RTX 5060, cc=12.0
+[2025-08-23 19:50:42] INFO phase10 - [REGIME] gap_(None,None)
+[2025-08-23 19:50:42] INFO phase10 - [COUNTS] buy_ok=707, sell_ok=503
+[2025-08-23 19:50:42] INFO phase10 - [SAMPLES] buy idx: 2011-05-03 00:00:00, 2011-05-04 00:00:00, 2011-05-05 00:00:00, 2011-05-17 00:00:00, 2011-05-24 00:00:00 | sell idx: 2011-07-01 00:00:00, 2011-07-05 00:00:00, 2011-09-14 00:00:00, 2011-09-15 00:00:00, 2011-09-16 00:00:00
+[2025-08-23 19:50:42] INFO phase10 - [REGIME] gap_(NaN)
+[2025-08-23 19:50:42] INFO phase10 - [COUNTS] buy_ok=33, sell_ok=38
+[2025-08-23 19:50:42] INFO phase10 - [SAMPLES] buy idx: 2010-07-29 00:00:00, 2010-07-30 00:00:00, 2010-08-11 00:00:00, 2010-08-12 00:00:00, 2010-08-13 00:00:00 | sell idx: 2010-07-21 00:00:00, 2010-07-27 00:00:00, 2010-09-21 00:00:00, 2010-09-27 00:00:00, 2010-09-30 00:00:00
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] totals_all_rows      : buy=740, sell=541
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] totals_in_ma_gap_dom : buy=707, sell=503
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] sum_per_regime==dom? : buy=True (sum=707 vs dom=707), sell=True (sum=503 vs dom=503)
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] in_NaN_domain        : buy=33, sell=38
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] overlaps             : 0, first_date=None
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] holes                : 0, first_date=None
+[2025-08-23 19:50:42] INFO phase10 - [CHECK] boundary assignments : (none)
+[2025-08-23 19:50:42] INFO phase10 - [LOG]    wrote logs/phase10_masks_by_regime.log

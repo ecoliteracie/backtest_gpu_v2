@@ -117,8 +117,10 @@ def main():
         if tag_exists(tag, dry=args.dry_run):
             print(f"Tag {tag} already exists. Skipping tag creation.")
         else:
+            # Create and push the tag if it doesn't exist
             run(["git", "tag", "-a", tag, "-m", f"The end of Phase {phase}"], dry=args.dry_run)
             run(["git", "push", "origin", tag], dry=args.dry_run)
+            print(f"Created and pushed tag {tag}")
 
         print("\nDone.")
     except subprocess.CalledProcessError as e:
