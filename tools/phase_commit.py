@@ -113,14 +113,47 @@ def main():
         # Push branch
         run(["git", "push", "-u", "origin", branch], dry=args.dry_run)
 
-        # Check tag existence
+        # Check tag existence and create/push if needed
         if tag_exists(tag, dry=args.dry_run):
             print(f"Tag {tag} already exists. Skipping tag creation.")
         else:
-            # Create and push the tag if it doesn't exist
-            run(["git", "tag", "-a", tag, "-m", f"The end of Phase {phase}"], dry=args.dry_run)
-            run(["git", "push", "origin", tag], dry=args.dry_run)
-            print(f"Created and pushed tag {tag}")
+            print(f"Creating and pushing tag {tag}...")
+            try:
+                # Create the tag
+                run(["git", "tag", "-a", tag, "-m", f"The end of Phase {phase}"], dry=args.dry_run)
+                print(f"  - Created local tag {tag}")
+                
+                # Push the tag with retries
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        print(f"  - Pushing tag to remote (attempt {attempt}/{max_retries})...")
+                        run(["git", "push", "origin", tag], dry=args.dry_run)
+                        print(f"  - Successfully pushed tag {tag} to remote")
+                        break
+                    except subprocess.CalledProcessError as e:
+                        if attempt == max_retries:
+                            raise
+                        print(f"  - Push failed, retrying ({attempt}/{max_retries})...")
+                        import time
+                        time.sleep(1)  # Wait a bit before retrying
+                
+                # Verify the tag exists on remote
+                if not args.dry_run:
+                    print("  - Verifying tag on remote...")
+                    remote_tags = run(["git", "ls-remote", "--tags", "origin"], dry=args.dry_run).stdout
+                    if f"refs/tags/{tag}" not in remote_tags:
+                        raise RuntimeError(f"Tag {tag} was not found on remote after push")
+                
+                print(f"\n✓ Successfully created and pushed tag {tag}")
+                
+            except Exception as e:
+                print(f"\n✗ Failed to create/push tag {tag}")
+                print(f"Error: {str(e)}")
+                print("\nYou may need to manually create and push the tag with:")
+                print(f"  git tag -a {tag} -m \"The end of Phase {phase}\"")
+                print(f"  git push origin {tag}")
+                raise
 
         print("\nDone.")
     except subprocess.CalledProcessError as e:
