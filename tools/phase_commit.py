@@ -123,17 +123,26 @@ def main():
                 run(["git", "tag", "-a", tag, "-m", f"The end of Phase {phase}"], dry=args.dry_run)
                 print(f"  - Created local tag {tag}")
                 
-                # Push the tag with retries
+                # Push the tag with retries and force push if needed
                 max_retries = 3
                 for attempt in range(1, max_retries + 1):
                     try:
                         print(f"  - Pushing tag to remote (attempt {attempt}/{max_retries})...")
-                        run(["git", "push", "origin", tag], dry=args.dry_run)
+                        # First try with force to ensure the tag is updated if it exists
+                        run(["git", "push", "origin", f"refs/tags/{tag}", "--force"], dry=args.dry_run)
                         print(f"  - Successfully pushed tag {tag} to remote")
                         break
                     except subprocess.CalledProcessError as e:
                         if attempt == max_retries:
-                            raise
+                            print(f"  - Error pushing tag: {e}")
+                            # Try one last time with --force-with-lease for safety
+                            try:
+                                run(["git", "push", "origin", f"refs/tags/{tag}", "--force-with-lease"], dry=args.dry_run)
+                                print(f"  - Successfully force-pushed tag {tag} with --force-with-lease")
+                                break
+                            except subprocess.CalledProcessError as e2:
+                                print(f"  - Final attempt failed: {e2}")
+                                raise
                         print(f"  - Push failed, retrying ({attempt}/{max_retries})...")
                         import time
                         time.sleep(1)  # Wait a bit before retrying
@@ -141,11 +150,25 @@ def main():
                 # Verify the tag exists on remote
                 if not args.dry_run:
                     print("  - Verifying tag on remote...")
-                    remote_tags = run(["git", "ls-remote", "--tags", "origin"], dry=args.dry_run).stdout
-                    if f"refs/tags/{tag}" not in remote_tags:
-                        raise RuntimeError(f"Tag {tag} was not found on remote after push")
-                
-                print(f"\n✓ Successfully created and pushed tag {tag}")
+                    try:
+                        # Fetch all tags from remote first
+                        run(["git", "fetch", "--tags", "--force"], dry=args.dry_run)
+                        
+                        # Check if tag exists on remote
+                        remote_tags = run(["git", "ls-remote", "--tags", "origin"], dry=args.dry_run).stdout
+                        if f"refs/tags/{tag}" not in remote_tags:
+                            # Try one more time with a fresh fetch
+                            run(["git", "fetch", "--tags", "--force"], dry=args.dry_run)
+                            remote_tags = run(["git", "ls-remote", "--tags", "origin"], dry=args.dry_run).stdout
+                            if f"refs/tags/{tag}" not in remote_tags:
+                                raise RuntimeError(f"Tag {tag} was not found on remote after push")
+                        
+                        print(f"\n✓ Successfully created and pushed tag {tag}")
+                        print(f"   Remote URL: https://github.com/ecoliteracie/backtest_gpu_v2/releases/tag/{tag}")
+                    except Exception as e:
+                        print(f"\n⚠ Warning: Could not verify tag on remote: {e}")
+                        print("  The tag might still have been pushed. Please check GitHub manually.")
+                        print(f"  You can also try running: git push origin {tag} --force")
                 
             except Exception as e:
                 print(f"\n✗ Failed to create/push tag {tag}")
