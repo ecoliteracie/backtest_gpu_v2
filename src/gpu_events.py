@@ -16,6 +16,20 @@ NONE, BUY, SELL = 0, 1, 2
 
 # Keep NONE, BUY, SELL = 0,1,2 as-is
 
+def _prepare_rsi_by_period(df, map_dict):
+    """Build a (P,T) array for the given period->column map, plus period order and a period->row index map."""
+    periods = sorted(map_dict.keys())
+    T = len(df)
+    P = len(periods)
+    arr = np.empty((P, T), dtype=np.float64)
+    for i, p in enumerate(periods):
+        col = map_dict[p]
+        if col not in df.columns:
+            raise ValueError(f"Required RSI column missing: {col}")
+        arr[i, :] = df[col].to_numpy(np.float64, copy=False)
+    p2row = {p: i for i, p in enumerate(periods)}
+    return arr, periods, p2row
+
 def _prepare_by_period(df, map_dict: Dict[int, str]) -> tuple[np.ndarray, list[int]]:
     periods = sorted(map_dict.keys())
     T = len(df)
@@ -55,9 +69,7 @@ def _numba_supported() -> tuple[bool, str]:
         dev = cuda.get_current_device()
         cc = getattr(dev, "compute_capability", (0, 0))
         major, minor = int(cc[0]), int(cc[1])
-        # Conservative: many Numba builds (as of 2025) don’t officially support cc 12.x yet.
-        if major >= 12:
-            return False, f"Unsupported compute capability {major}.{minor} for current Numba build"
+        # Try anyway; if the kernel launch fails we'll catch and fallback.
         return True, f"cc={major}.{minor}"
     except Exception as e:
         return False, f"probe failed: {e}"
@@ -180,6 +192,20 @@ def _cpu_fallback(rsi_close_by_period, rsi_low_by_period, rsi_high_by_period,
 
 
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import math
+
+def _cpu_fallback_chunk(args) -> np.ndarray:
+    # Expected 8-tuple: (rsi_close_PT, rsi_low_PT, rsi_high_PT, regime_mask,
+    #                    buy_idx_chunk, sell_idx_chunk, buy_thr_chunk, sell_thr_chunk)
+    (rsi_close_PT, rsi_low_PT, rsi_high_PT,
+     regime_mask, buy_idx_chunk, sell_idx_chunk, buy_thr_chunk, sell_thr_chunk) = args
+
+    return _cpu_fallback(
+        rsi_close_PT, rsi_low_PT, rsi_high_PT,
+        regime_mask, buy_idx_chunk, sell_idx_chunk, buy_thr_chunk, sell_thr_chunk
+    )
+
 def build_event_streams(
     df,
     rsi_maps: Dict[str, Dict[int, str]],
@@ -188,34 +214,27 @@ def build_event_streams(
     backend: str = "auto",
     batch_size: int | None = None,
 ) -> Dict[str, object]:
-    """
-    Build events_type[C,T] (0/1/2) for a list of combos using the band rule.
-    """
     T = len(df)
-    close_map = rsi_maps["close_map"]
-    low_map   = rsi_maps["low_map"]
-    high_map  = rsi_maps["high_map"]
 
-    # Prepare arrays with aligned period rows
-    rsiC, periods = _prepare_by_period(df, close_map)     # (P,T)
-    rsiL = _prepare_by_period_aligned(df, periods, low_map)
-    rsiH = _prepare_by_period_aligned(df, periods, high_map)
+    # CLOSE map is authoritative for period indexing
+    rsi_close_PT, close_periods, p2row = _prepare_rsi_by_period(df, rsi_maps["close_map"])
 
-    # Map period -> row index using CLOSE periods
-    p2row = {p: i for i, p in enumerate(periods)}
+    # LOW/HIGH bands are required for the (bracket / fully below / fully above) tests
+    rsi_low_PT,  _, _ = _prepare_rsi_by_period(df, rsi_maps["low_map"])
+    rsi_high_PT, _, _ = _prepare_rsi_by_period(df, rsi_maps["high_map"])
 
     C = len(combos)
     buy_idx = np.empty(C, dtype=np.int32)
     sell_idx = np.empty(C, dtype=np.int32)
-    buy_thr = np.empty(C, dtype=np.float64)
+    buy_thr  = np.empty(C, dtype=np.float64)
     sell_thr = np.empty(C, dtype=np.float64)
+
     for i, (bp, sp, bthr, sthr) in enumerate(combos):
-        if (bp not in p2row) or (sp not in p2row):
+        if bp not in p2row or sp not in p2row:
             raise ValueError(f"RSI period missing in maps: buy={bp} or sell={sp}")
-        # Also ensure L/H exist for those periods (prepare_by_period_aligned would have raised already)
         buy_idx[i] = p2row[bp]
         sell_idx[i] = p2row[sp]
-        buy_thr[i] = bthr
+        buy_thr[i]  = bthr
         sell_thr[i] = sthr
 
     if regime_mask_host is None:
@@ -223,30 +242,50 @@ def build_event_streams(
     if len(regime_mask_host) != T:
         raise ValueError("regime_mask_host length mismatch")
 
-    # Backend choice (Numba often disabled for cc>=12, so CPU path is common)
+    # Decide backend (Numba kernel uses CLOSE for prev-day check AND LOW/HIGH for band checks)
     use_numba = False
     reason = ""
-    if backend.lower() == "numba":
+    if backend.lower() in ("auto", "numba"):
         ok, reason = _numba_supported()
-        use_numba = ok
-    elif backend.lower() == "auto":
-        ok, reason = _numba_supported()
-        use_numba = ok
-    else:
-        use_numba = False
-        reason = "forced CPU backend"
+        use_numba = ok and (backend.lower() != "cpu")
 
     if use_numba:
         try:
-            events_type = _launch_numba_kernel(rsiC, rsiL, rsiH, regime_mask_host,
-                                               buy_idx, sell_idx, buy_thr, sell_thr)
-            return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"numba({reason})"}}
+            # NOTE: pass CLOSE/LOW/HIGH PT arrays, not Close prices
+            events_type = _launch_numba_kernel(
+                rsi_close_PT, rsi_low_PT, rsi_high_PT, regime_mask_host,
+                buy_idx, sell_idx, buy_thr, sell_thr
+            )
+            return {
+                "events_type": events_type,
+                "meta": {
+                    "combos": combos, "T": T, "C": C,
+                    "backend": f"numba({reason})"
+                }
+            }
         except Exception as e:
-            events_type = _cpu_fallback(rsiC, rsiL, rsiH, regime_mask_host,
-                                        buy_idx, sell_idx, buy_thr, sell_thr)
-            return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"cpu(fallback:{e})"}}
+            # Hard fallback to CPU
+            events_type = _cpu_fallback(
+                rsi_close_PT, rsi_low_PT, rsi_high_PT,
+                regime_mask_host, buy_idx, sell_idx, buy_thr, sell_thr
+            )
+            return {
+                "events_type": events_type,
+                "meta": {
+                    "combos": combos, "T": T, "C": C,
+                    "backend": f"cpu(fallback:{e})"
+                }
+            }
 
     # CPU path
-    events_type = _cpu_fallback(rsiC, rsiL, rsiH, regime_mask_host,
-                                buy_idx, sell_idx, buy_thr, sell_thr)
-    return {"events_type": events_type, "meta": {"combos": combos, "T": T, "C": C, "backend": f"cpu({reason})"}}
+    events_type = _cpu_fallback(
+        rsi_close_PT, rsi_low_PT, rsi_high_PT,
+        regime_mask_host, buy_idx, sell_idx, buy_thr, sell_thr
+    )
+    return {
+        "events_type": events_type,
+        "meta": {
+            "combos": combos, "T": T, "C": C,
+            "backend": f"cpu({reason})"
+        }
+    }
