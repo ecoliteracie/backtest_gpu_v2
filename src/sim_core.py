@@ -1,14 +1,20 @@
 # --- add/replace in src/sim_core.py ---
 from __future__ import annotations
 
-import os
-import math
 import csv
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 
 import numpy as np
 import pandas as pd
+import os, math, itertools, time
+from pathlib import Path
+
+from src.gpu_events import build_event_streams
+from src.price_solver import find_price_for_target_rsi
+from src.banners import phase11 as banner11_mod 
+from src.logging_setup import get_logger
+
 
 # Expect these to be present from your Phase-7 output:
 # rsi_maps = {"close_map": {p: col}, "low_map": {p: col}, "high_map": {p: col}}
@@ -275,60 +281,180 @@ def simulate_once_from_events(
         "trades_path": trades_path if write_trades else "",
     }
 
+# --- sim_core.py (replace simulate_grid_summary entirely) ---
+# Reuse your existing helpers in this file:
+# - simulate_once_from_events (unchanged)
+# If you don’t have it, keep your current version; this function calls it.
+
+def _safe_label(label: str | None) -> str:
+    if label in (None, "gap_all", "gap_(None,None)"):
+        return "gap_all"
+    s = str(label)
+    s = s.replace("(", "").replace(")", "").replace(" ", "")
+    s = s.replace(",", "_").replace("None", "inf")
+    s = s.replace("-inf", "neginf")  # prevent double minus sequences in filenames
+    s = s.replace("__", "_")
+    return s
+
+def _int_range_inclusive(lo: int, hi: int) -> List[int]:
+    if lo > hi:
+        lo, hi = hi, lo
+    return list(range(int(lo), int(hi) + 1))
+
+def _int_range_exclusive_max(lo: int, hi_exclusive: int) -> List[int]:
+    if lo >= hi_exclusive:
+        return []
+    return list(range(int(lo), int(hi_exclusive)))
+
+def _grid_from_cfg(cfg: Dict) -> Tuple[List[int], List[int], List[int], List[int]]:
+    # Periods: expected 2..10 inclusive (step=1), per your acceptance math (9 values).
+    rlo = int(cfg.get("RSI_MIN", 2))
+    rhi = int(cfg.get("RSI_MAX", 14))
+    buy_periods  = _int_range_inclusive(rlo, rhi)
+    sell_periods = _int_range_inclusive(rlo, rhi)
+
+    # Thresholds: MAX is exclusive per your expectation (20..39) and (50..89).
+    bt_lo = int(cfg.get("BUY_THRESHOLD_MIN", 20))
+    bt_hi = int(cfg.get("BUY_THRESHOLD_MAX", 40))  # exclusive
+    st_lo = int(cfg.get("SELL_THRESHOLD_MIN", 60))
+    st_hi = int(cfg.get("SELL_THRESHOLD_MAX", 90))  # exclusive
+    buy_thrs  = _int_range_exclusive_max(bt_lo, bt_hi)
+    sell_thrs = _int_range_exclusive_max(st_lo, st_hi)
+
+    return buy_periods, sell_periods, buy_thrs, sell_thrs
+
+def _expected_combo_count(bp: List[int], sp: List[int], bt: List[int], st: List[int]) -> int:
+    return len(bp) * len(sp) * len(bt) * len(st)
+
 def simulate_grid_summary(
     df: pd.DataFrame,
     rsi_maps: Dict[str, Dict[int, str]],
-    events_type: np.ndarray,                        # shape (C, T)
-    combos: List[Tuple[int, int, float, float]],    # length C
-    cfg: Dict[str, Any],
     regime_label: str | None,
+    cfg: Dict,
     out_dir: str = "results",
+    backend: str = "auto",
+    batch_size: int | None = None,
 ) -> str:
     """
-    Run pricing + single-position accounting for every combo, collect summary rows,
-    and write one CSV per regime at results/<symbol>__<regime>.csv.
-    Returns the CSV path.
+    Runs the full grid from cfg and writes one CSV with summary rows for the given regime.
+    Returns the output CSV path.
     """
-    os.makedirs(out_dir, exist_ok=True)
-    T = len(df)
-    symbol = _infer_symbol_from_cfg(cfg)
-    tag = _regime_tag(regime_label)
-    out_path = os.path.join(out_dir, f"summary_{symbol}__{tag}.csv")
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    logger = get_logger("phase11_summary", Path("logs") / "phase11_summary.log")
+
+    # Build full ranges (no sampling)
+    buy_periods, sell_periods, buy_thrs, sell_thrs = _grid_from_cfg(cfg)
+
+    # Diagnostics
+    exp = _expected_combo_count(buy_periods, sell_periods, buy_thrs, sell_thrs)
+    hdr = (
+        f"[GRID] buy_p={buy_periods[0]}..{buy_periods[-1]}({len(buy_periods)}), "
+        f"sell_p={sell_periods[0]}..{sell_periods[-1]}({len(sell_periods)}), "
+        f"buy_thr={buy_thrs[0]}..{buy_thrs[-1]}({len(buy_thrs)} excl-max), "
+        f"sell_thr={sell_thrs[0]}..{sell_thrs[-1]}({len(sell_thrs)} excl-max)"
+    )
+    print(hdr); logger.info(hdr)
+    print(f"[EXPECTED] combos={exp}"); logger.info(f"[EXPECTED] combos={exp}")
+
+    # Build the all-True or per-regime mask
+    from src import regimes
+    if regime_label in (None, "gap_all", "gap_(None,None)"):
+        regime_mask_host = np.ones(len(df), dtype=bool)
+    else:
+        regime_mask_host = regimes.regime_mask(df, regime_label)
+
+    # Compose the combos (skip bt >= st)
+    combos: List[Tuple[int, int, float, float]] = []
+    for bp in buy_periods:
+        for sp in sell_periods:
+            for bt in buy_thrs:
+                for st in sell_thrs:
+                    if bt < st:
+                        combos.append((int(bp), int(sp), float(bt), float(st)))
+
+    if len(combos) != exp:
+        msg = f"[WARN] filtered (bt<st) combos={len(combos)} differs from expected={exp}"
+        print(msg); logger.info(msg)
+
+    # Choose batch size if not provided
+    if batch_size is None:
+        # Reasonable default: 2048 combos per launch; adjust as needed
+        batch_size = int(cfg.get("GRID_BATCH_SIZE", 2048))
 
     tol_pct = float(cfg.get("RSI_TOLERANCE_PCT", 0.001))
 
     rows = []
-    for i, combo in enumerate(combos):
-        ev = events_type[i]
-        res = simulate_once_from_events(
+    processed = 0
+    start_time = time.time()
+
+    # Batch over combos to avoid memory spikes
+    for b0 in range(0, len(combos), batch_size):
+        b1 = min(b0 + batch_size, len(combos))
+        batch = combos[b0:b1]
+
+        # GPU events for this batch
+        streams = build_event_streams(
             df=df,
             rsi_maps=rsi_maps,
-            events_type_1d=ev,
-            combo=combo,
-            tolerance_pct=tol_pct,
-            cfg=cfg,
-            regime_label=regime_label,
-            out_dir="logs",         # keep detailed trades in logs/ if you want; or set write_trades=False
-            write_trades=False,     # summary run: no per-trade CSV
+            regime_mask_host=regime_mask_host,
+            combos=batch,
+            backend=backend,
         )
-        buy_p, sell_p, buy_thr, sell_thr = combo
-        rows.append([
-            buy_p, sell_p, buy_thr, sell_thr,
-            res["final_value"], res["roi_pct"], res["cagr_pct"],
-            res["buy_cnt"], res["sell_cnt"], res["invested_cash"],
-        ])
+        events_type = streams["events_type"]  # shape (B, T)
 
-    # Write summary table
-    with open(out_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            "Buy RSI Period", "Sell RSI Period", "Buy RSI <", "Sell RSI >",
-            "Swing Final Portfolio", "Swing ROI %", "Swing CAGR %",
-            "Buy Count", "Sell Count", "Total Invested"
-        ])
-        w.writerows(rows)
+        # Price each combo’s events on host; collect summary row
+        for i, combo in enumerate(batch):
+            ev = events_type[i]
+            sim_res = simulate_once_from_events(
+                df=df,
+                rsi_maps=rsi_maps,
+                events_type_1d=ev,
+                combo=combo,
+                tolerance_pct=tol_pct,
+                cfg=cfg,
+                regime_label=regime_label,
+                out_dir="logs",  # per-combo trades CSVs not required here; simulate_once can skip file if you prefer
+                write_trades=False,  # make sure simulate_once_from_events supports skipping CSV
+            )
+            rows.append({
+                "Buy RSI Period":   int(combo[0]),
+                "Sell RSI Period":  int(combo[1]),
+                "Buy RSI <":        int(combo[2]),
+                "Sell RSI >":       int(combo[3]),
+                "Swing Final Portfolio": float(sim_res["final_value"]),
+                "Swing ROI %":      float(sim_res["roi_pct"]),
+                "Swing CAGR %":     float(sim_res["cagr_pct"]),
+                "Buy Count":        int(sim_res["buy_cnt"]),
+                "Sell Count":       int(sim_res["sell_cnt"]),
+                "Total Invested":   float(sim_res["invested_cash"]),
+            })
 
-    return out_path
+        processed += len(batch)
+        if processed % 1000 == 0 or b1 == len(combos):
+            elapsed = time.time() - start_time
+            msgp = f"[PROGRESS] processed {processed} / {len(combos)} combos in {elapsed:.1f}s"
+            print(msgp); logger.info(msgp)
+
+    # Verify shape: we expect exactly all bt<st combos
+    if processed != len(combos):
+        msg = f"[ERROR] processed {processed} != combos {len(combos)}"
+        print(msg); logger.error(msg)
+        raise RuntimeError(msg)
+
+    # Build DataFrame, sort, and write per-regime CSV
+    df_out = pd.DataFrame(rows)
+    df_out.sort_values(by=["Swing CAGR %", "Swing ROI %"], ascending=[False, False], inplace=True)
+
+    safe_label = _safe_label(regime_label)
+    out_path = Path(out_dir) / f"summary_{safe_label}.csv"
+    df_out.to_csv(out_path, index=False)
+
+    # Final diagnostics
+    msg_ok = f"[PROCESSED] combos={processed}, wrote {out_path}"
+    print(msg_ok); logger.info(msg_ok)
+
+    return str(out_path)
+# --- end replace ---
 
 
 

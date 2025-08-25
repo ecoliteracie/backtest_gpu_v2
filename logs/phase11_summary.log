@@ -1,0 +1,4 @@
+[2025-08-24 20:00:45] INFO phase11_summary - [GRID] buy_p=2..14(13), sell_p=2..14(13), buy_thr=20..39(20 excl-max), sell_thr=60..89(30 excl-max)
+[2025-08-24 20:00:45] INFO phase11_summary - [EXPECTED] combos=101400
+[2025-08-24 20:26:15] INFO phase11_summary - [PROGRESS] processed 101400 / 101400 combos in 1529.9s
+[2025-08-24 20:26:16] INFO phase11_summary - [PROCESSED] combos=101400, wrote results\summary_gap_all.csv
